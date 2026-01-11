@@ -1,75 +1,78 @@
 # Skills
 
-Este repo contiene skills para Codex.
+Este repositorio contiene herramientas y "skills" para potenciar el desarrollo con IAs como Trae u OpenCode.
 
-## access-module-encoding
+## access-vba-sync
 
-Revisa y normaliza la codificacion de modulos Access/VBA (.bas/.cls).
+Herramienta para sincronizar bidireccionalmente código VBA (Access) con archivos locales versionables en Git, y generar documentación de base de datos.
 
-Instalar en otra maquina:
-```bash
-python ~/.codex/skills/.system/skill-installer/scripts/install-skill-from-github.py \
-  --repo ardelperal/skills --path access-module-encoding
-```
+**Características:**
+- Sincronización bidireccional (Exportar VBA a archivos / Importar archivos a VBA).
+- "Watch" mode para desarrollo en tiempo real (edita en VS Code, se actualiza en Access).
+- Generación de diagramas ERD / Diccionario de datos en Markdown.
+- Manejo de codificación (evita problemas de acentos/mojibake).
 
-Uso rapido:
-```bash
-# revisar
-python ~/.codex/skills/access-module-encoding/scripts/check_access_module_encoding.py \
-  --root C:\Proyectos\gestion-proyectos --extensions .bas .cls --strict
+### Requisitos
+- Windows
+- Microsoft Access instalado
+- Node.js 18+
 
-# normalizar a UTF-8 sin BOM
-python ~/.codex/skills/access-module-encoding/scripts/normalize_access_module_encoding.py \
-  --root C:\Proyectos\gestion-proyectos --extensions .bas .cls --backup
-```
+### Instalación y Uso
 
-## Skills privadas
+#### Opción A: Uso directo (Standalone)
 
-Si el repo es privado, necesitas un token de GitHub:
+1. **Instalar dependencias:**
+   ```powershell
+   cd access-vba-sync
+   npm install
+   ```
 
-Windows (PowerShell):
+2. **Comandos básicos:**
+   ```powershell
+   # Iniciar modo Watch (desarrollo en vivo)
+   node access-vba-sync/cli.js watch --access "C:\Ruta\TuBaseDeDatos.accdb"
+
+   # Generar documentación ERD
+   node access-vba-sync/cli.js generate-erd --backend "C:\Ruta\TuBackend_Datos.accdb"
+
+   # Ayuda completa
+   node access-vba-sync/cli.js --help
+   ```
+
+#### Opción B: Integración con Agentes (Trae / OpenCode)
+
+Si utilizas un agente de IA, puedes añadir este skill a tu proyecto para que el agente pueda leer y modificar tu código VBA de forma nativa.
+
+1. **Estructura de carpetas:**
+   Crea una carpeta `skill` en la raíz de tu proyecto y coloca `access-vba-sync` dentro.
+   `MiProyecto/skill/access-vba-sync/SKILL.md`
+
+2. **Uso:**
+   El agente detectará automáticamente las capacidades (leer código, exportar, generar ERD) a través del archivo `SKILL.md` y podrá ejecutar las herramientas por ti.
+
+---
+
+## Cómo instalar en un proyecto nuevo (Sparse Checkout)
+
+Si quieres incorporar `access-vba-sync` a un repositorio existente sin clonar todo el historial de este repo de skills:
+
 ```powershell
-setx GITHUB_TOKEN "<token>"
-```
+# Estando en la raíz de tu proyecto:
 
-Bash:
-```bash
-export GITHUB_TOKEN="<token>"
-```
+# 1. Clonar temporalmente sin descargar archivos
+git clone --depth 1 --filter=blob:none --sparse https://github.com/ardelperal/skills.git .skills-temp
 
-Instalacion:
-```bash
-python ~/.codex/skills/.system/skill-installer/scripts/install-skill-from-github.py \
-  --repo <owner>/skills --path <nombre-skill>
-```
+# 2. Seleccionar solo access-vba-sync
+cd .skills-temp
+git sparse-checkout set access-vba-sync
 
-Si el download falla, fuerza git:
-```bash
-python ~/.codex/skills/.system/skill-installer/scripts/install-skill-from-github.py \
-  --repo <owner>/skills --path <nombre-skill> --method git
-```
+# 3. Mover a tu carpeta de skills y limpiar
+if (-not (Test-Path "skill")) { New-Item -ItemType Directory -Force -Path "skill" }
+Move-Item access-vba-sync ..\skill\access-vba-sync
+cd ..
+Remove-Item -Recurse -Force .skills-temp
 
-## Plantillas
-
-Plantilla base de SKILL.md:
-- SKILL_TEMPLATE.md
-
-Skeleton completo:
-- templates/skill/
-
-Ejemplo (PowerShell):
-```powershell
-Copy-Item -Recurse templates\skill <nombre-skill>
-```
-
-Ejemplo (bash):
-```bash
-cp -r templates/skill <nombre-skill>
-```
-
-Despues:
-```bash
-git add <nombre-skill>
-git commit -m "feat: add <nombre-skill> skill"
-git push
+# 4. Instalar dependencias
+cd skill/access-vba-sync
+npm install
 ```

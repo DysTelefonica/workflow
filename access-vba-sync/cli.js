@@ -56,11 +56,14 @@ function printHelp() {
       "  node skill_access_vba_sync/cli.js watch [--access <ruta>] [--destination_root <carpeta>] [--debounce_ms <n>]",
       "  node skill_access_vba_sync/cli.js import <Mod...>",
       "  node skill_access_vba_sync/cli.js sync <Mod...>",
+      "  node skill_access_vba_sync/cli.js generate-erd [--backend <ruta>] [--erd_path <ruta>]",
       "  node skill_access_vba_sync/cli.js status",
       "  node skill_access_vba_sync/cli.js end",
       "",
       "Flags:",
       "  --access <ruta>                Ruta .accdb/.accde/.mdb/.mde (relativa a CWD o absoluta)",
+      "  --backend <ruta>               Ruta al Backend (_Datos) para generate-erd",
+      "  --erd_path <ruta>              Carpeta de salida para el ERD",
       "  --destination_root <carpeta>   Carpeta de export/import (default: src)",
       "  --debounce_ms <n>              Debounce/batching para watch (default: 600)",
       "  --auto_export_on_end false     Desactiva export final"
@@ -113,6 +116,13 @@ async function main() {
 
   if (command === "end") {
     await skill.end();
+    return;
+  }
+
+  if (command === "generate-erd") {
+    const backendPath = normalizePathFlag(flags.backend);
+    const erdPath = normalizePathFlag(flags.erd_path);
+    await skill.generateErd({ backendPath, erdPath });
     return;
   }
 

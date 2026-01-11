@@ -2,8 +2,11 @@
 [CmdletBinding()]
 Param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet("Export", "Import", "Fix-Encoding")]
+    [ValidateSet("Export", "Import", "Fix-Encoding", "Generate-ERD")]
     [string]$Action,
+
+    [string]$BackendPath,
+    [string]$ErdPath,
 
     [string]$AccessPath,
 
@@ -240,7 +243,7 @@ function Resolve-ModulesPath {
     Param(
         [Parameter(Mandatory = $true)][string]$DestinationRoot,
         [Parameter(Mandatory = $true)][string]$AccessPath,
-        [Parameter(Mandatory = $true)][ValidateSet("Export", "Import", "Fix-Encoding")][string]$Action
+        [Parameter(Mandatory = $true)][ValidateSet("Export", "Import", "Fix-Encoding", "Generate-ERD")][string]$Action
     )
     if (-not (Test-Path -Path $DestinationRoot)) {
         if ($Action -eq "Export" -or $Action -eq "Fix-Encoding") {
@@ -653,13 +656,18 @@ function Fix-EncodingInAccess {
 $session = $null
 
 try {
-    $AccessPath = Resolve-AccessPath -AccessPath $AccessPath
     $DestinationRoot = Resolve-DestinationRoot -DestinationRoot $DestinationRoot
-    $ModulesPath = Resolve-ModulesPath -DestinationRoot $DestinationRoot -AccessPath $AccessPath -Action $Action
 
-    Write-Status -Message ("Accion: {0}" -f $Action) -Color Yellow
-    Write-Status -Message ("Base de datos: {0}" -f $AccessPath) -Color Yellow
-    Write-Status -Message ("Carpeta: {0}" -f $ModulesPath) -Color Yellow
+    if ($Action -ne "Generate-ERD") {
+        $AccessPath = Resolve-AccessPath -AccessPath $AccessPath
+        $ModulesPath = Resolve-ModulesPath -DestinationRoot $DestinationRoot -AccessPath $AccessPath -Action $Action
+
+        Write-Status -Message ("Accion: {0}" -f $Action) -Color Yellow
+        Write-Status -Message ("Base de datos: {0}" -f $AccessPath) -Color Yellow
+        Write-Status -Message ("Carpeta: {0}" -f $ModulesPath) -Color Yellow
+    } else {
+        Write-Status -Message ("Accion: {0}" -f $Action) -Color Yellow
+    }
 
     $normalizedModules = @($ModuleName | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 
@@ -711,6 +719,42 @@ try {
             Import-VbaModule -VbProject $vbProject -ModuleName $name -ModulesPath $ModulesPath
         }
         Write-Status -Message ("OK Import completado ({0})" -f $total) -Color Green
+    } elseif ($Action -eq "Generate-ERD") {
+        if ([string]::IsNullOrWhiteSpace($BackendPath)) {
+            $candidates = Get-ChildItem -Path (Get-Location) -File -Filter "*_Datos.accdb" -ErrorAction SilentlyContinue
+            if (-not $candidates) {
+                $candidates = Get-ChildItem -Path (Get-Location) -File -Filter "*_Datos.mdb" -ErrorAction SilentlyContinue
+            }
+            
+            if ($candidates) {
+                if ($candidates.Count -gt 1) {
+                    Write-Status -Message "ADVERTENCIA: Multiples backends encontrados, usando el primero: $($candidates[0].Name)" -Color Yellow
+                }
+                $BackendPath = $candidates[0].FullName
+            } else {
+                throw "No se especifico -BackendPath y no se encontro ningun archivo *_Datos.accdb/.mdb en el directorio actual."
+            }
+        }
+        
+        $BackendPath = (Resolve-Path -Path $BackendPath).Path
+        Write-Status -Message ("Backend: {0}" -f $BackendPath) -Color Yellow
+        
+        if ([string]::IsNullOrWhiteSpace($ErdPath)) {
+            $parent = Split-Path -Parent $DestinationRoot
+            $ErdPath = Join-Path -Path $parent -ChildPath "ERD"
+        }
+        
+        if (-not (Test-Path -Path $ErdPath)) {
+            New-Item -ItemType Directory -Force -Path $ErdPath | Out-Null
+        }
+        $ErdPath = (Resolve-Path -Path $ErdPath).Path
+        Write-Status -Message ("ERD Folder: {0}" -f $ErdPath) -Color Yellow
+        
+        $mdFile = Join-Path -Path $ErdPath -ChildPath "Estructura_Datos.md"
+        
+        Export-DataStructure -DatabasePath $BackendPath -OutputPath $mdFile -Password $Password
+        
+        Write-Status -Message ("OK ERD generado en: {0}" -f $mdFile) -Color Green
     } else {
         $fixedSrc = 0
         $fixedAccess = 0

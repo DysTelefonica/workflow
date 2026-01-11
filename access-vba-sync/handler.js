@@ -132,7 +132,7 @@ class AccessVbaSyncSkill {
     return destinationRootAbs;
   }
 
-  runVbaManager({ action, accessPath, destinationRootAbs, moduleNames = [] }) {
+  runVbaManager({ action, accessPath, destinationRootAbs, moduleNames = [], backendPath, erdPath }) {
     return new Promise((resolve, reject) => {
       const exe = powershellExe();
       const args = [
@@ -148,6 +148,13 @@ class AccessVbaSyncSkill {
         "-DestinationRoot",
         destinationRootAbs
       ];
+
+      if (backendPath) {
+        args.push("-BackendPath", backendPath);
+      }
+      if (erdPath) {
+        args.push("-ErdPath", erdPath);
+      }
 
       if (Array.isArray(moduleNames) && moduleNames.length > 0) {
         args.push("-ModuleName", ...moduleNames);
@@ -473,6 +480,23 @@ class AccessVbaSyncSkill {
     console.log("\n🏁 Sesión finalizada.");
     console.log(`   Módulos sincronizados: ${changed.length}`);
     if (changed.length > 0) console.log("   " + changed.join(", "));
+  }
+
+  async generateErd({ backendPath, erdPath } = {}) {
+    await this.ensureReady();
+    await this.loadSessionFromDisk();
+
+    const destinationRootAbs = this.session.destinationRoot || this.resolveDestinationRoot();
+    
+    console.log("📊 Generando ERD...");
+    await this.runVbaManager({
+      action: "Generate-ERD",
+      accessPath: "",
+      destinationRootAbs,
+      backendPath,
+      erdPath
+    });
+    console.log("✅ ERD Generado.");
   }
 
   async status() {
