@@ -21,7 +21,7 @@ Definir un **skill** (implementación a realizar por otra IA) que automatice el 
   - `-Action Export|Import|Fix-Encoding`
   - `-AccessPath <ruta>`
   - `-DestinationRoot <carpeta>`
-  - `-ModuleName <string[]>` (múltiples).
+  - `-ModuleName <string[]>` (múltiples).  
   Si NO soporta array, el skill debe iterar e invocar Import 1×módulo.
 
 ---
@@ -30,7 +30,7 @@ Definir un **skill** (implementación a realizar por otra IA) que automatice el 
 ### R1. Inicio de sesión (start)
 - Detectar `AccessPath`:
   - Si el usuario lo pasa: usarlo (aceptar rutas relativas a project root).
-  - Si no: autodetectar en project root: `.accdb/.accde/.mdb/.mde`.
+  - Si no: autodetectar en project root: `.accdb/.accde/.mdb/.mde`.  
     Si hay varias, elegir determinista (alfabético) y avisar.
 - Ejecutar: `VBAManager.ps1 -Action Export -AccessPath ... -DestinationRoot ...`
 - Persistir estado de sesión en disco (para que `sync/end/status` funcionen sin mantener proceso vivo):
@@ -89,13 +89,12 @@ El skill debe exponer al menos:
 
 ## Estructura propuesta del paquete del skill
 <projectRoot>/
-access-vba-sync/
-SKILL.md
-scripts/
-  VBAManager.ps1
-  handler.js
-  cli.js
-  package.json
+skill_access_vba_sync/
+VBAManager.ps1
+handler.(js|py|ps1) # lógica principal
+cli.(js|py|ps1) # comandos start/watch/sync/end/status
+README.md
+SKILL.md # este documento
 
 > Importante: el skill vive en su carpeta, pero se ejecuta con `projectRoot = cwd` (la raíz del repo), para que `src/` quede en el proyecto y no dentro del skill.
 
@@ -122,7 +121,8 @@ scripts/
 
 ## Pruebas mínimas
 - Start con BD única y sin BD.
-- Export crea `src/*.bas|*.cls|*.frm`.
+- Export crea `src/<BD.ext>/Modules`.
 - Watch: editar un `.bas` y confirmar Import.
 - Import manual con 2 módulos (array).
 - End: export final + resumen.
+

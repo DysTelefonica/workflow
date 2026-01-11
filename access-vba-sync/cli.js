@@ -52,12 +52,12 @@ function printHelp() {
   console.log(
     [
       "Uso:",
-      "  node access-vba-sync/scripts/cli.js start [--access <ruta>] [--destination_root <carpeta>]",
-      "  node access-vba-sync/scripts/cli.js watch [--access <ruta>] [--destination_root <carpeta>] [--debounce_ms <n>]",
-      "  node access-vba-sync/scripts/cli.js import <Mod...>",
-      "  node access-vba-sync/scripts/cli.js sync <Mod...>",
-      "  node access-vba-sync/scripts/cli.js status",
-      "  node access-vba-sync/scripts/cli.js end",
+      "  node skill_access_vba_sync/cli.js start [--access <ruta>] [--destination_root <carpeta>]",
+      "  node skill_access_vba_sync/cli.js watch [--access <ruta>] [--destination_root <carpeta>] [--debounce_ms <n>]",
+      "  node skill_access_vba_sync/cli.js import <Mod...>",
+      "  node skill_access_vba_sync/cli.js sync <Mod...>",
+      "  node skill_access_vba_sync/cli.js status",
+      "  node skill_access_vba_sync/cli.js end",
       "",
       "Flags:",
       "  --access <ruta>                Ruta .accdb/.accde/.mdb/.mde (relativa a CWD o absoluta)",
@@ -98,7 +98,7 @@ async function main() {
 
   if (command === "import" || command === "sync") {
     if (mods.length === 0) {
-      console.error("Faltan módulos. Ejemplo: node access-vba-sync/scripts/cli.js import Utilidades Validaciones");
+      console.error("Faltan módulos. Ejemplo: node skill_access_vba_sync/cli.js import Utilidades Validaciones");
       process.exitCode = 1;
       return;
     }
