@@ -1,26 +1,30 @@
-# SKILL.md — Skill para workflow Access/VBA (Export → Trabajo → Sync → Compilar → Cierre)
+# SKILL.md — Skill para workflow Access/VBA (Export → Trabajo → Sync → Compilar → ERD → Cierre)
 
 ## Objetivo
-Definir un **skill** (implementación a realizar por otra IA) que automatice el workflow de desarrollo en un proyecto Microsoft Access/VBA:
+Definir un **skill** (implementación a realizar por otra IA) que automatice el workflow de desarrollo y documentación en un proyecto Microsoft Access/VBA:
 
 1) **Al inicio** de una nueva feature/fix: **Exportar TODOS los módulos** del proyecto VBA a disco (snapshot base).
 2) Se trabaja sobre la mejora editando los archivos exportados (normalmente con IA).
 3) **Todo módulo modificado por la IA debe sincronizarse** (Import) hacia el VBA real de la BD.
 4) Tras cada sincronización, el skill **debe proponer al usuario compilar** el proyecto en el VBE.
-5) **Al cerrar** la tarea (fin de sesión): export final opcional (snapshot consistente) + resumen.
+5) **Generación de documentación**: Extraer estructura de tablas (ERD/Diccionario) a Markdown para contexto de la IA.
+6) **Al cerrar** la tarea (fin de sesión): export final opcional (snapshot consistente) + resumen.
 
 > El skill debe ser **autocontenido**: incluir dentro **VBAManager.ps1** y todo lo necesario para ejecutarse.
 
 ---
 
 ## Alcance y supuestos
-- Entorno: **Windows** con Microsoft Access instalado (automatización COM).
+- Entorno: **Windows** con Microsoft Access instalado (automatización COM y DAO).
 - El repositorio contiene una BD Access (`.accdb/.accde/.mdb/.mde`) en la raíz del proyecto, o el usuario la pasa por parámetro.
 - La exportación se guarda bajo una carpeta configurable `src/`.
+- La documentación se genera en `docs/` o ruta configurable.
 - Se asume que `VBAManager.ps1` soporta:
-  - `-Action Export|Import|Fix-Encoding`
-  - `-AccessPath <ruta>`
+  - `-Action Export|Import|Fix-Encoding|Generate-ERD`
+  - `-AccessPath <ruta>` (Frontend)
+  - `-BackendPath <ruta>` (Backend para ERD)
   - `-DestinationRoot <carpeta>`
+  - `-ErdPath <ruta archivo>`
   - `-ModuleName <string[]>` (múltiples).  
   Si NO soporta array, el skill debe iterar e invocar Import 1×módulo.
 
@@ -59,17 +63,26 @@ Ejemplo:
   - Hacer debounce/batching (ej. 500–1000 ms) y luego Import de todos los módulos tocados en esa ventana.
 - En `unlink` (borrado): avisar (no se puede borrar módulo en VBA automáticamente de forma segura).
 
-### R5. Fin de sesión (end)
+### R5. Generación de ERD (generate-erd)
+- Permitir extraer la estructura de tablas (Frontend o Backend) a formato Markdown.
+- Parámetros:
+  - `--backend <ruta>`: Ruta al archivo Access con las tablas (puede ser el mismo Frontend o un Backend separado).
+  - `--erd_path <ruta>`: Ruta de salida del archivo Markdown (ej. `docs/structure.md`).
+- Ejecutar: `VBAManager.ps1 -Action Generate-ERD -BackendPath ... -ErdPath ...`
+- Autodetectar backend si no se especifica (buscar en root).
+
+### R6. Fin de sesión (end)
 - Parar watcher si está activo.
 - Si hay cambios pendientes: hacer sync final.
 - Export final opcional (configurable): `-Action Export`.
 - Imprimir resumen: nº módulos sincronizados + lista.
 
-### R6. Comandos mínimos del skill
+### R7. Comandos mínimos del skill
 El skill debe exponer al menos:
 - `start` (export inicial + estado)
 - `watch` (start si no hay sesión + auto-sync)
 - `sync`/`import <Mod...>` (import manual por lista)
+- `generate-erd` (documentación de tablas)
 - `end` (cierre + export final opcional)
 - `status` (estado de sesión)
 
@@ -89,7 +102,7 @@ El skill debe exponer al menos:
 
 ## Estructura propuesta del paquete del skill
 <projectRoot>/
-skill_access_vba_sync/
+access-vba-sync/
 VBAManager.ps1
 handler.(js|py|ps1) # lógica principal
 cli.(js|py|ps1) # comandos start/watch/sync/end/status
@@ -103,10 +116,11 @@ SKILL.md # este documento
 ## Flujo de trabajo esperado (integración)
 ### Nueva feature/fix
 1) `start` → Export total a `src/`
-2) IA modifica archivos en esa carpeta.
-3) `watch` (o `sync` al terminar) → Import de módulos modificados.
-4) Usuario compila en VBE cuando el skill lo recuerde.
-5) `end` → sync final + export final opcional.
+2) `generate-erd` → Generar contexto de datos en `docs/structure.md` (opcional).
+3) IA modifica archivos en `src/` basándose en código y estructura de datos.
+4) `watch` (o `sync` al terminar) → Import de módulos modificados.
+5) Usuario compila en VBE cuando el skill lo recuerde.
+6) `end` → sync final + export final opcional.
 
 ---
 
