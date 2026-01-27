@@ -43,7 +43,18 @@ Copy-Item .\skill\cadete-devops\resources\quay_auth.json $env:USERPROFILE\.confi
 ```
 
 **3. Configuración de tokens de OpenShift**
-Añade tus tokens temporales a la sesión de PowerShell (o a tu perfil de Windows):
+Tienes dos opciones:
+
+**3. Configuración de tokens de OpenShift**
+Tienes dos opciones:
+
+A) Crear un archivo `.env` basado en el ejemplo:
+```powershell
+Copy-Item .\skill\cadete-devops\.env.example .\skill\cadete-devops\.env
+notepad .\skill\cadete-devops\.env
+```
+
+B) O añadirlos a tu sesión de PowerShell:
 ```powershell
 $env:OC_TOKEN_PRE = "sha256~TU_TOKEN_PRE"
 $env:OC_TOKEN_PRO = "sha256~TU_TOKEN_PRO"

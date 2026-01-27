@@ -27,10 +27,28 @@ Este skill automatiza el flujo de trabajo de desarrollo con contenedores para el
 ### Variables de Entorno
 
 ```powershell
-# Tokens de OpenShift (cambian frecuentemente)
+# Opción A: Configurar en sesión (PowerShell)
 $env:OC_TOKEN_PRE = "sha256~tu_token_preproduccion"
 $env:OC_TOKEN_PRO = "sha256~tu_token_produccion"
 ```
+
+### Configuración Persistente (.env)
+
+El skill incluye un archivo de plantilla `.env.example`. Para usarlo:
+
+1. Copia `.env.example` a `.env` (este archivo está ignorado por git):
+   ```powershell
+   Copy-Item .\resources\.env.example .\resources\.env
+   # O en la raíz del skill si está ahí
+   Copy-Item .env.example .env
+   ```
+
+2. Edita el nuevo archivo `.env` con tus tokens:
+   ```ini
+   OC_TOKEN_PRE=sha256~tu_token_preproduccion
+   OC_TOKEN_PRO=sha256~tu_token_produccion
+   ```
+
 
 ### Autenticación en Quay
 

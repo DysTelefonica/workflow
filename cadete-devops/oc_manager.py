@@ -20,6 +20,40 @@ from typing import Optional, List, Dict, Any
 SKILL_DIR = Path(__file__).parent.absolute()
 CONFIG_PATH = SKILL_DIR / "config.json"
 QUAY_AUTH_PATH = SKILL_DIR / "resources" / "quay_auth.json"
+ENV_PATH = SKILL_DIR / ".env"
+ENV_EXAMPLE_PATH = SKILL_DIR / ".env.example"
+
+
+def load_env_file():
+    """Carga variables de entorno desde el archivo .env del skill."""
+    if not ENV_PATH.exists():
+        if ENV_EXAMPLE_PATH.exists():
+            print(f"⚠️  No se encontró {ENV_PATH}")
+            print(f"💡 Sugerencia: Copia .env.example a .env y configura tus tokens:")
+            print(f"   Copy-Item '{ENV_EXAMPLE_PATH}' '{ENV_PATH}'")
+        return
+
+    print(f"📄 Cargando configuración desde {ENV_PATH}")
+    try:
+        with open(ENV_PATH, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                
+                if "=" in line:
+                    key, value = line.split("=", 1)
+                    key = key.strip()
+                    value = value.strip()
+                    
+                    # Solo cargar si tiene valor y no está ya definida
+                    if value and key not in os.environ:
+                        os.environ[key] = value
+    except Exception as e:
+        print(f"⚠️  Error leyendo .env: {e}")
+
+# Cargar variables al importar el módulo
+load_env_file()
 
 
 def load_config() -> Dict[str, Any]:

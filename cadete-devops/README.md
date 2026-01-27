@@ -9,6 +9,11 @@ Skill para automatizar el flujo de trabajo de desarrollo con contenedores en el 
 Copy-Item .\resources\quay_auth.json $env:USERPROFILE\.config\containers\auth.json
 
 # 2. Configurar tokens de OpenShift
+# Opción A: Copiar plantilla .env.example y editar
+Copy-Item .\cadete-devops\.env.example .\cadete-devops\.env
+notepad .\cadete-devops\.env
+
+# Opción B: Variables de entorno temporales
 $env:OC_TOKEN_PRE = "sha256~tu_token_preproduccion"
 $env:OC_TOKEN_PRO = "sha256~tu_token_produccion"
 ```
