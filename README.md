@@ -52,6 +52,30 @@ Si utilizas un agente de IA, puedes añadir este skill a tu proyecto para que el
 
 ---
 
+## cadete-devops
+
+Skill especializado para el flujo de trabajo con contenedores y OpenShift en entornos corporativos de Telefónica.
+
+**Características:**
+- Gestión inteligente de proxy corporativo (VPN/no-VPN).
+- Construcción local con Podman y subida a Quay corporativo.
+- Despliegue automatizado en OpenShift (Pre-producción y Producción).
+- Operaciones de base de datos (Importación SQL y gestión de permisos GRANT).
+- Sincronización de volúmenes persistentes (PVC).
+
+### Requisitos
+- Windows
+- Podman
+- oc CLI (OpenShift)
+
+### Instalación y Uso
+```powershell
+# Ver ayuda completa
+python cadete-devops/cli.py --help
+```
+
+---
+
 ## Cómo instalar en un proyecto nuevo (Sparse Checkout)
 
 Si quieres incorporar `access-vba-sync` a un repositorio existente sin clonar todo el historial de este repo de skills:
