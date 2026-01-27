@@ -115,8 +115,14 @@ def cmd_rollback(args):
 
 
 def cmd_import_sql(args):
-    """Importa un archivo SQL al pod MySQL."""
+    """Importa un archivo SQL al pod MySQL y configura permisos para 'user'."""
     success = oc.import_sql(args.cluster, args.ns, args.file, args.pod)
+    return 0 if success else 1
+
+
+def cmd_grant_user(args):
+    """Solo configura permisos GRANT ALL para el usuario 'user'."""
+    success = oc.import_sql(args.cluster, args.ns, None, args.pod)
     return 0 if success else 1
 
 
@@ -222,12 +228,19 @@ Variables de entorno requeridas:
     p_rollback.set_defaults(func=cmd_rollback)
     
     # === IMPORT-SQL ===
-    p_sql = subparsers.add_parser("import-sql", help="Importar SQL al pod MySQL")
+    p_sql = subparsers.add_parser("import-sql", help="Importar SQL al pod MySQL (siempre ejecuta GRANT para 'user')")
     p_sql.add_argument("--cluster", required=True, choices=["pre", "pro"], help="Cluster")
     p_sql.add_argument("--ns", required=True, help="Namespace")
-    p_sql.add_argument("--file", "-f", required=True, help="Archivo SQL")
+    p_sql.add_argument("--file", "-f", help="Archivo SQL (opcional, si no se pasa solo hace GRANT)")
     p_sql.add_argument("--pod", "-p", help="Pod MySQL (auto-detecta si no se especifica)")
     p_sql.set_defaults(func=cmd_import_sql)
+    
+    # === GRANT-USER ===
+    p_grant = subparsers.add_parser("grant-user", help="Configurar GRANT ALL para usuario 'user' en MySQL")
+    p_grant.add_argument("--cluster", required=True, choices=["pre", "pro"], help="Cluster")
+    p_grant.add_argument("--ns", required=True, help="Namespace")
+    p_grant.add_argument("--pod", "-p", help="Pod MySQL (auto-detecta si no se especifica)")
+    p_grant.set_defaults(func=cmd_grant_user)
     
     # === SYNC-PVC ===
     p_sync = subparsers.add_parser("sync-pvc", help="Sincronizar archivos con PVC")

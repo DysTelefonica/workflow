@@ -102,8 +102,12 @@ python cli.py deploy --cluster pro --ns wcdy-prod-frt --version 10.15
 
 | Comando | Descripción |
 |---------|-------------|
-| `import-sql --cluster CLU --ns NS --file SQL` | Importar SQL al pod MySQL |
+| `import-sql --cluster CLU --ns NS [--file SQL]` | Importar SQL y configurar permisos para 'user' |
+| `grant-user --cluster CLU --ns NS` | Solo configurar GRANT ALL para usuario 'user' |
 | `sync-pvc --cluster CLU --ns NS --local DIR` | Sincronizar PVC de anexos |
+
+> [!NOTE]
+> **import-sql** y **grant-user** siempre ejecutan `GRANT ALL PRIVILEGES ON *.* TO 'user'@'%'` automáticamente.
 
 ---
 

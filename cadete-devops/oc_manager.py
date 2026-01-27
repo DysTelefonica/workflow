@@ -306,14 +306,17 @@ def rollback_deployment(cluster: str, namespace: str, deployment: str) -> bool:
         return False
 
 
-def import_sql(cluster: str, namespace: str, sql_file: str, mysql_pod: Optional[str] = None) -> bool:
+def import_sql(cluster: str, namespace: str, sql_file: Optional[str] = None, mysql_pod: Optional[str] = None) -> bool:
     """
-    Importa un archivo SQL al pod de MySQL.
+    Importa un archivo SQL al pod de MySQL y garantiza permisos para el usuario 'user'.
+    
+    SIEMPRE ejecuta GRANT ALL PRIVILEGES para el usuario 'user' sobre todas las bases de datos,
+    independientemente de si se importa un archivo SQL o no.
     
     Args:
         cluster: Cluster de OpenShift
         namespace: Namespace
-        sql_file: Ruta al archivo SQL local
+        sql_file: Ruta al archivo SQL local (opcional)
         mysql_pod: Nombre del pod MySQL (si no se especifica, se busca automáticamente)
     """
     if not oc_login(cluster):
@@ -322,10 +325,12 @@ def import_sql(cluster: str, namespace: str, sql_file: str, mysql_pod: Optional[
     if not set_namespace(namespace):
         return False
     
-    sql_path = Path(sql_file)
-    if not sql_path.exists():
-        print(f"❌ Archivo SQL no encontrado: {sql_file}")
-        return False
+    # Verificar archivo SQL si se proporciona
+    if sql_file:
+        sql_path = Path(sql_file)
+        if not sql_path.exists():
+            print(f"❌ Archivo SQL no encontrado: {sql_file}")
+            return False
     
     # Buscar pod de MySQL si no se especifica
     if not mysql_pod:
@@ -342,28 +347,43 @@ def import_sql(cluster: str, namespace: str, sql_file: str, mysql_pod: Optional[
             print("❌ Error buscando pod de MySQL")
             return False
     
-    print(f"\n📥 Importando SQL a pod {mysql_pod}...")
-    
     try:
-        # Copiar archivo al pod
-        remote_path = f"/tmp/{sql_path.name}"
-        run_command(["oc", "cp", str(sql_path), f"{mysql_pod}:{remote_path}"])
+        # Importar SQL si se proporciona archivo
+        if sql_file:
+            sql_path = Path(sql_file)
+            print(f"\n📥 Importando SQL a pod {mysql_pod}...")
+            
+            # Copiar archivo al pod
+            remote_path = f"/tmp/{sql_path.name}"
+            run_command(["oc", "cp", str(sql_path), f"{mysql_pod}:{remote_path}"])
+            
+            # Ejecutar importación
+            run_command([
+                "oc", "exec", mysql_pod, "--",
+                "bash", "-c",
+                f"mysql -u root < {remote_path}"
+            ])
+            
+            # Limpiar archivo temporal
+            run_command(["oc", "exec", mysql_pod, "--", "rm", remote_path], check=False)
+            
+            print("✅ SQL importado correctamente")
         
-        # Ejecutar importación
-        # Nota: Ajustar según configuración de MySQL (usuario, base de datos, etc.)
+        # SIEMPRE ejecutar GRANT para el usuario 'user'
+        print(f"\n🔑 Configurando permisos para usuario 'user'...")
+        
+        grant_sql = "GRANT ALL PRIVILEGES ON *.* TO 'user'@'%' WITH GRANT OPTION; FLUSH PRIVILEGES;"
         run_command([
             "oc", "exec", mysql_pod, "--",
             "bash", "-c",
-            f"mysql -u root < {remote_path}"
+            f"mysql -u root -e \"{grant_sql}\""
         ])
         
-        # Limpiar
-        run_command(["oc", "exec", mysql_pod, "--", "rm", remote_path], check=False)
-        
-        print("✅ SQL importado correctamente")
+        print("✅ Usuario 'user' tiene GRANT ALL en todas las bases de datos")
         return True
+        
     except subprocess.CalledProcessError as e:
-        print(f"❌ Error importando SQL: {e}")
+        print(f"❌ Error: {e}")
         return False
 
 
