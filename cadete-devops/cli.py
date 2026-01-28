@@ -135,6 +135,16 @@ def cmd_sync_pvc(args):
     return 0 if success else 1
 
 
+def cmd_deploy_backup(args):
+    """Despliega un backup RAR en todos los entornos."""
+    # Ruta por defecto especificada por el usuario
+    default_path = r"c:\Proyectos\ubi9\cadete\scripts\backups\ext.rar"
+    rar_path = args.file or default_path
+    
+    success = oc.deploy_backup(rar_path, target_cluster=args.cluster)
+    return 0 if success else 1
+
+
 def cmd_login(args):
     """Login en un cluster de OpenShift."""
     success = oc.oc_login(args.cluster)
@@ -251,6 +261,12 @@ Variables de entorno requeridas:
     p_sync.add_argument("--pod", "-p", help="Pod con PVC montado")
     p_sync.add_argument("--remote", "-r", help="Ruta remota en el pod")
     p_sync.set_defaults(func=cmd_sync_pvc)
+    
+    # === DEPLOY-BACKUP ===
+    p_backup = subparsers.add_parser("deploy-backup", help="Desplegar backup RAR")
+    p_backup.add_argument("--file", "-f", help="Archivo RAR (opcional)")
+    p_backup.add_argument("--cluster", "-c", choices=["pre", "pro"], help="Cluster específico (opcional)")
+    p_backup.set_defaults(func=cmd_deploy_backup)
     
     # === LOGIN ===
     p_login = subparsers.add_parser("login", help="Login en OpenShift")

@@ -36,6 +36,6 @@
     "mysql": "mysql"
   },
   "pvc": {
-    "anexos": "pvc-anexos"
+    "anexos": "web-pvc"
   }
 }
