@@ -1,5 +1,19 @@
 # Cadete-DevOps
 
+## Onboarding rápido: archivos requeridos
+
+- `cadete-devops\.env`: archivo de configuración del skill. Cópialo desde `cadete-devops\.env.example` y edítalo con tus tokens (`OC_TOKEN_PRE`, `OC_TOKEN_PRO`) y otros parámetros necesarios.
+- `resources\quay_auth.json`: credenciales para autenticación de contenedores. Se utiliza para instalar el `auth.json` de Podman/containers en el perfil del usuario.
+
+```powershell
+# Preparar .env en la carpeta del skill
+Copy-Item .\cadete-devops\.env.example .\cadete-devops\.env
+notepad .\cadete-devops\.env
+
+# Instalar credenciales de Quay en containers/auth.json
+Copy-Item .\resources\quay_auth.json $env:USERPROFILE\.config\containers\auth.json
+```
+
 Skill para automatizar el flujo de trabajo de desarrollo con contenedores en el entorno corporativo de Telefónica: construcción con Podman, push a Quay y despliegue en OpenShift.
 
 ## Instalación Rápida
