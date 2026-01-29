@@ -1,5 +1,19 @@
 # SKILL.md — Skill Cadete-DevOps para Quay/OpenShift Corporativo
 
+## Onboarding rápido: archivos requeridos
+
+- `cadete-devops\.env`: archivo de configuración del skill. Cópialo desde `cadete-devops\.env.example` y edítalo con tus tokens (`OC_TOKEN_PRE`, `OC_TOKEN_PRO`) y otros parámetros necesarios.
+- `resources\quay_auth.json`: credenciales para autenticación de contenedores. Se utiliza para instalar el `auth.json` de Podman/containers en el perfil del usuario.
+
+```powershell
+# Preparar .env en la carpeta del skill
+Copy-Item .\cadete-devops\.env.example .\cadete-devops\.env
+notepad .\cadete-devops\.env
+
+# Instalar credenciales de Quay en containers/auth.json
+Copy-Item .\resources\quay_auth.json $env:USERPROFILE\.config\containers\auth.json
+```
+
 ## 1. Visión General y Objetivo
 
 Este skill encapsula la lógica de operaciones DevOps para el proyecto **Cadete** en la infraestructura de Telefónica. Su propósito es permitir a agentes de IA y desarrolladores humanos realizar tareas complejas de despliegue y mantenimiento de forma estandarizada y segura.
