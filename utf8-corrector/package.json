@@ -1,0 +1,16 @@
+{
+  "name": "utf8-corrector",
+  "version": "1.0.0",
+  "description": "Herramienta para corregir codificación UTF-8",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "utf8",
+    "encoding",
+    "fix"
+  ],
+  "author": "",
+  "license": "ISC"
+}
