@@ -2,6 +2,18 @@
 
 Skill para limpiar y arreglar problemas de codificación en archivos VBA exportados de Microsoft Access.
 
+## ⚠️ CARACTERÍSTICA CRÍTICA - LIMPIEZA AUTOMÁTICA
+
+**Este skill está configurado para que Claude SIEMPRE limpie automáticamente cualquier código VBA antes de presentártelo.**
+
+Esto significa que cuando Claude:
+- Modifique código VBA que le hayas enviado
+- Genere nuevo código VBA
+- Refactorice o arregle bugs en VBA
+- Haga CUALQUIER cambio en archivos VBA
+
+**Automáticamente ejecutará el script de limpieza** para asegurar que puedas copiar y pegar el código directamente en tu IDE de VBA sin problemas de encoding.
+
 ## 📦 Contenido
 
 Este paquete incluye:

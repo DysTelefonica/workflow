@@ -1,11 +1,26 @@
 ---
 name: vba-cleaner
-description: Clean and fix encoding issues in exported VBA code from Microsoft Access. Use when the user uploads VBA files (.bas, .cls, .frm) with encoding problems, BOM (Byte Order Mark) characters, or requests to "clean", "fix encoding", or "remove BOM" from VBA/Access code files. Automatically detects encoding, removes BOM, and converts to clean UTF-8.
+description: Clean and fix encoding issues in exported VBA code from Microsoft Access. Use when the user uploads VBA files (.bas, .cls, .frm) with encoding problems, BOM (Byte Order Mark) characters, or requests to "clean", "fix encoding", or "remove BOM" from VBA/Access code files. CRITICAL - Also trigger automatically whenever Claude modifies, edits, or generates any VBA code to ensure the output is clean UTF-8 without BOM before presenting to the user. Automatically detects encoding, removes BOM, and converts to clean UTF-8.
 ---
 
 # VBA Code Cleaner
 
 Fix encoding issues and BOM (Byte Order Mark) problems in VBA files exported from Microsoft Access.
+
+## ⚠️ CRITICAL AUTOMATIC RULE
+
+**ALWAYS run this cleaning script on ANY VBA code before presenting it to the user**, whether:
+- User uploaded a VBA file that Claude edited
+- Claude generated new VBA code from scratch
+- Claude modified existing VBA code
+- Claude refactored, fixed bugs, or made any changes to VBA code
+
+**Workflow mandate:**
+1. Make your code changes in a temporary file
+2. ALWAYS run `python scripts/clean_vba.py` on the file
+3. ONLY THEN present the cleaned file to the user
+
+This ensures the user can copy-paste the code directly into their VBA IDE without encoding issues.
 
 ## Overview
 
@@ -54,6 +69,19 @@ python scripts/clean_vba.py /path/to/vba_modules --dir --pattern *.bas --recursi
 ```
 
 ## Workflow
+
+### Automatic Usage (Required for all VBA code modifications)
+
+When Claude modifies ANY VBA code:
+```bash
+# 1. Claude makes changes to the VBA file
+# 2. MANDATORY: Clean the file before presenting to user
+python scripts/clean_vba.py /home/claude/modified_module.bas /mnt/user-data/outputs/Module1.bas
+
+# 3. Present the cleaned file to user
+```
+
+### Manual Usage (User-initiated cleaning)
 
 1. User uploads VBA file(s) to `/mnt/user-data/uploads`
 2. Run the cleaning script on the file(s)
