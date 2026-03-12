@@ -1,64 +1,144 @@
-# skill_access_vba_sync
+# VBA Access Sync
 
-Skill local autocontenido para tu workflow Access/VBA:
+Skill de sincronización bidireccional para proyectos Microsoft Access/VBA.
 
-1) `start` → Export inicial (snapshot)  
-2) Editas archivos exportados en `src/`  
-3) `watch` auto-importa cada guardado (`.bas/.cls` y opcional `.frm`)  
-4) Tras cada import: te recuerda “Abre Access → VBE → Debug → Compile”  
-5) `end` → sync final + export final opcional + resumen  
+## Descripción
+
+Permite trabajar con el código VBA de Microsoft Access como archivos de texto plano en tu editor favorito, manteniendo sincronización automática entre el código fuente y la base de datos.
+
+### Características Principales
+
+- **Export desatendido**: Extrae todos los módulos VBA sin ejecutar formularios de inicio ni macros AutoExec
+- **Estructura organizada**: Separa automáticamente en carpetas según el tipo de módulo
+- **Sincronización automática**: Detecta cambios en archivos y los importa a Access en tiempo real
+- **Generación de ERD**: Exporta la estructura de la base de datos backend a Markdown
+- **Sesiones persistentes**: Mantiene estado entre ejecuciones
 
 ## Requisitos
 
-- Windows
-- Microsoft Access instalado (automatización COM)
-- PowerShell
+- Windows 10/11
+- Microsoft Access (versión 2016 o superior recomendada)
+- PowerShell 5.1+
 - Node.js 18+
 
 ## Instalación
 
-Desde la raíz del proyecto (CWD = projectRoot):
-
 ```powershell
-cd skill_access_vba_sync
+cd access-vba-sync
 npm install
+```
+
+## Estructura de Archivos Exportados
+
+```
+src/
+├── modules/          # Módulos .bas
+│   └── MiModulo.bas
+├── classes/          # Clases .cls
+│   └── MiClase.cls
+└── forms/            # Formularios (dos archivos por formulario)
+    ├── MiFormulario.form.txt   # UI + código completo
+    └── MiFormulario.cls        # Solo código VBA
 ```
 
 ## Uso
 
-Siempre ejecuta los comandos desde la raíz del proyecto (donde está la `.accdb`):
+### Iniciar Sesión
 
-### Start (export inicial)
 ```powershell
-node skill_access_vba_sync/cli.js start --access "MiBD.accdb"
+node cli.js start
 ```
 
-Si no pasas `--access`, autodetecta en CWD (`.accdb/.accde/.mdb/.mde`). Si hay varias, elige la primera por orden alfabético y avisa.
+Inicia la sesión, exporta todos los módulos VBA y genera el ERD del backend.
 
-### Watch (lo normal)
+**Flags disponibles:**
+- `--access "MiBD.accdb"` - Base de datos específica (opcional, autodetecta si hay una)
+- `--destination_root src` - Carpeta de destino (default: `src`)
+
+### Watching (Sincronización Automática)
+
 ```powershell
-node skill_access_vba_sync/cli.js watch --access "MiBD.accdb" --debounce_ms 800
+node cli.js watch
 ```
 
-Edita módulos en:
-`src/*.bas|*.cls|*.frm`
+Monitorea cambios en `src/` e importa automáticamente a Access al guardar.
 
-### Import / Sync manual por módulos
+**Flags disponibles:**
+- `--access "MiBD.accdb"`
+- `--destination_root src`
+- `--debounce_ms 800` - Milisegundos de espera antes de importar (default: 800)
+
+### Import Manual
+
 ```powershell
-node skill_access_vba_sync/cli.js import Utilidades Validaciones
+node cli.js import Modulo1 Modulo2
 ```
 
-### Status
+Importa módulos específicos por nombre.
+
+### Generar ERD
+
 ```powershell
-node skill_access_vba_sync/cli.js status
+node cli.js generate-erd
 ```
 
-### End
+Genera documentación de la estructura de la base de datos backend.
+
+**Flags disponibles:**
+- `--backend "MiBD_Datos.accdb"` - Backend a documentar (autodetecta `*_Datos.accdb`)
+
+### Estado de Sesión
+
 ```powershell
-node skill_access_vba_sync/cli.js end
+node cli.js status
 ```
 
-## Flags útiles
+Muestra el estado actual de la sesión.
 
-- `--destination_root src` (default: `src`)
-- `--auto_export_on_end false`
+### Finalizar Sesión
+
+```powershell
+node cli.js end
+```
+
+Cierra la sesión y restaura cualquier configuración de Access modificada.
+
+**Flags disponibles:**
+- `--auto_export_on_end false` - Desactivar export final
+
+## Configuración de Acceso
+
+El skill maneja automáticamente:
+
+- **StartupForm**: Deshabilita el formulario de inicio antes de abrir
+- **AutoExec**: Renombra temporalmente macros AutoExec para evitar ejecución
+- **AllowBypassKey**: Asegura acceso completo a la base de datos
+
+Al cerrar, restaura automáticamente todos estos valores.
+
+## Integración con Trae
+
+Este skill está diseñado para funcionar como parte del framework VBA-SDD. Para desplegar en un nuevo proyecto:
+
+```powershell
+.\deploy.ps1
+```
+
+Esto copiará el skill, generará la estructura inicial y exportará el código VBA automáticamente.
+
+## Resolución de Problemas
+
+### Access se abre visiblemente
+- Verifica que no hay procesos de Access zombis: `Get-Process MSACCESS | Stop-Process`
+- El skill debería ejecutarse con `Visible = false`
+
+### Error al exportar formulario
+- Algunos formularios con código complejo pueden fallar por errores COM
+- El export continuará con los siguientes módulos
+
+### La BD tiene contraseña
+- Pasa la contraseña con: `--password "micontraseña"`
+
+## Licencia
+
+Uso interno - Framework VBA-SDD

@@ -41,12 +41,20 @@ Definir un **skill** (implementación a realizar por otra IA) que automatice el 
   - accessPath, destinationRoot, modulesPath, startedAt, changedModules.
 
 ### R2. Ruta real de módulos exportados
-El skill exporta e importa directamente en la carpeta destino:
+El skill exporta e importa directamente en subcarpetas según el tipo de módulo:
 
-`<DestinationRoot>/*.bas|*.cls|*.frm`
+`<DestinationRoot>/modules/*.bas`
+`<DestinationRoot>/classes/*.cls`
+`<DestinationRoot>/forms/*.form.txt` (UI + código completo)
+`<DestinationRoot>/forms/*.cls` (solo código VBA, para formularios)
 
 Ejemplo:
-`src/Utilidades.bas`
+```
+src/modules/VariablesGlobales.bas
+src/classes/Usuario.cls
+src/forms/Form_FormWeb.form.txt
+src/forms/Form_FormWeb.cls
+```
 
 ### R3. Sincronización (sync/import)
 - Dado un conjunto de módulos (por nombre), ejecutar Import **solo de esos**:
@@ -135,7 +143,7 @@ SKILL.md # este documento
 
 ## Pruebas mínimas
 - Start con BD única y sin BD.
-- Export crea `src/<BD.ext>/Modules`.
+- Export crea `src/modules/`, `src/classes/` y `src/forms/`.
 - Watch: editar un `.bas` y confirmar Import.
 - Import manual con 2 módulos (array).
 - End: export final + resumen.

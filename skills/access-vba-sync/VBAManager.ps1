@@ -195,6 +195,108 @@ function Restore-AllowBypassKey {
     }
 }
 
+function Disable-StartupFeatures {
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory = $true)][string]$AccessPath,
+        [string]$Password
+    )
+
+    $dbEngine = New-DaoDbEngine
+    if (-not $dbEngine) { return $null }
+
+    $db = $null
+    $restoreInfo = [ordered]@{
+        RenamedAutoExec = $false
+        OriginalStartupForm = $null
+        HasStartupForm = $false
+    }
+
+    try {
+        $connect = if ($Password) { ";PWD=$Password" } else { "" }
+        $db = $dbEngine.OpenDatabase($AccessPath, $false, $false, $connect)
+
+        try {
+            $scripts = $db.Containers("Scripts")
+            foreach ($doc in $scripts.Documents) {
+                if ($doc.Name -eq "AutoExec_TraeBackup") {
+                     $autoExecExists = $false
+                     foreach ($d in $scripts.Documents) { if ($d.Name -eq "AutoExec") { $autoExecExists = $true } }
+
+                     if (-not $autoExecExists) {
+                        $doc.Name = "AutoExec"
+                     }
+                }
+            }
+
+            foreach ($doc in $scripts.Documents) {
+                if ($doc.Name -eq "AutoExec") {
+                    $doc.Name = "AutoExec_TraeBackup"
+                    $restoreInfo.RenamedAutoExec = $true
+                    break
+                }
+            }
+        } catch {}
+
+        try {
+            $prop = $db.Properties("StartupForm")
+            $restoreInfo.OriginalStartupForm = $prop.Value
+            $restoreInfo.HasStartupForm = $true
+            $db.Properties.Delete("StartupForm")
+        } catch {}
+
+        return [pscustomobject]$restoreInfo
+
+    } catch {
+        return $null
+    } finally {
+        if ($db) { $db.Close(); [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($db) | Out-Null }
+        if ($dbEngine) { [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($dbEngine) | Out-Null }
+    }
+}
+
+function Restore-StartupFeatures {
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory = $true)][string]$AccessPath,
+        [string]$Password,
+        $RestoreInfo
+    )
+
+    if (-not $RestoreInfo) { return }
+
+    $dbEngine = New-DaoDbEngine
+    $db = $null
+
+    try {
+        $connect = if ($Password) { ";PWD=$Password" } else { "" }
+        $db = $dbEngine.OpenDatabase($AccessPath, $false, $false, $connect)
+
+        if ($RestoreInfo.RenamedAutoExec) {
+            try {
+                $scripts = $db.Containers("Scripts")
+                foreach ($doc in $scripts.Documents) {
+                    if ($doc.Name -eq "AutoExec_TraeBackup") {
+                        $doc.Name = "AutoExec"
+                        break
+                    }
+                }
+            } catch {}
+        }
+
+        if ($RestoreInfo.HasStartupForm) {
+            try {
+                $newProp = $db.CreateProperty("StartupForm", [int16]10, $RestoreInfo.OriginalStartupForm)
+                $db.Properties.Append($newProp)
+            } catch {}
+        }
+    } catch {
+    } finally {
+        if ($db) { $db.Close(); [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($db) | Out-Null }
+        if ($dbEngine) { [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($dbEngine) | Out-Null }
+    }
+}
+
 function Resolve-AccessPath {
     [CmdletBinding()]
     Param(
@@ -341,12 +443,18 @@ function Open-AccessDatabase {
     $vbe = $null
     $vbProject = $null
     $prePids = @()
+    $startupInfo = $null
 
     try {
         $originalBypass = Get-AllowBypassKeyState -AccessPath $AccessPath -Password $Password
         $bypassOk = Enable-AllowBypassKey -AccessPath $AccessPath -Password $Password
         if (-not $bypassOk) {
             Write-Status -Message "ADVERTENCIA: No se pudo habilitar AllowBypassKey; abriendo de todas formas." -Color Yellow
+        }
+
+        $startupInfo = Disable-StartupFeatures -AccessPath $AccessPath -Password $Password
+        if (-not $startupInfo) {
+            throw "CRITICAL: No se pudo deshabilitar AutoExec/StartupForm. Se aborta la apertura para evitar ejecución no desatendida."
         }
 
         try {
@@ -394,6 +502,7 @@ function Open-AccessDatabase {
             Vbe               = $vbe
             VbProject         = $vbProject
             OriginalBypass    = $originalBypass
+            StartupInfo       = $startupInfo
             ProcessId         = $accessPid
         }
     } catch {
@@ -406,6 +515,9 @@ function Open-AccessDatabase {
         }
         if ($originalBypass) {
             try { Restore-AllowBypassKey -AccessPath $AccessPath -Password $Password -OriginalState $originalBypass } catch {}
+        }
+        if ($startupInfo) {
+            try { Restore-StartupFeatures -AccessPath $AccessPath -Password $Password -RestoreInfo $startupInfo } catch {}
         }
         throw
     }
@@ -422,6 +534,7 @@ function Close-AccessDatabase {
 
     $access = $Session.AccessApplication
     $orig = $Session.OriginalBypass
+    $startupInfo = $Session.StartupInfo
     $accessPid = $Session.ProcessId
 
     if ($access) {
@@ -434,6 +547,7 @@ function Close-AccessDatabase {
     }
 
     try { Restore-AllowBypassKey -AccessPath $AccessPath -Password $Password -OriginalState $orig } catch {}
+    try { Restore-StartupFeatures -AccessPath $AccessPath -Password $Password -RestoreInfo $startupInfo } catch {}
 
     [System.GC]::Collect()
     [System.GC]::WaitForPendingFinalizers()
@@ -446,13 +560,27 @@ function Close-AccessDatabase {
     }
 }
 
+function Get-ComponentFolder {
+    Param([Parameter(Mandatory = $true)]$Component, [string]$ModuleName)
+    $name = if ($ModuleName) { $ModuleName } else { $Component.Name }
+    if ($name -match "^Form_|^frm") { return "forms" }
+    $t = $Component.Type
+    if ($t -eq 1) { return "modules" }
+    if ($t -eq 2) { return "classes" }
+    if ($t -eq 100) { return "classes" }
+    if ($t -eq 3) { return "forms" }
+    return $null
+}
+
 function Get-ComponentExtension {
-    Param([Parameter(Mandatory = $true)]$Component)
+    Param([Parameter(Mandatory = $true)]$Component, [string]$ModuleName)
+    $name = if ($ModuleName) { $ModuleName } else { $Component.Name }
+    if ($name -match "^Form_|^frm") { return ".form.txt" }
     $t = $Component.Type
     if ($t -eq 1) { return ".bas" }
     if ($t -eq 2) { return ".cls" }
     if ($t -eq 100) { return ".cls" }
-    if ($t -eq 3) { return ".frm" }
+    if ($t -eq 3) { return ".form.txt" }
     return $null
 }
 
@@ -471,15 +599,34 @@ function Export-VbaModule {
     try {
         $component = $VbProject.VBComponents.Item($ModuleName)
         $type = [int]$component.Type
-        if ($type -ne 1 -and $type -ne 2 -and $type -ne 100) { return }
-        $ext = Get-ComponentExtension -Component $component
-        if (-not $ext) { return }
+        if ($type -ne 1 -and $type -ne 2 -and $type -ne 100 -and $type -ne 3) { return }
+        $ext = Get-ComponentExtension -Component $component -ModuleName $ModuleName
+        $folder = Get-ComponentFolder -Component $component -ModuleName $ModuleName
+        if (-not $ext -or -not $folder) { return }
 
-        $finalPath = Join-Path -Path $ModulesPath -ChildPath ($ModuleName + $ext)
+        $targetFolder = Join-Path -Path $ModulesPath -ChildPath $folder
+        if (-not (Test-Path -Path $targetFolder)) {
+            New-Item -Path $targetFolder -ItemType Directory -Force | Out-Null
+        }
+
+        $finalPath = Join-Path -Path $targetFolder -ChildPath ($ModuleName + $ext)
         $tmp = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("VBAManager_export_{0}{1}" -f @([guid]::NewGuid().ToString("N"), $ext))
 
         $component.Export($tmp)
         Convert-AnsiToUtf8NoBom -InputPath $tmp -OutputPath $finalPath
+
+        if ($ModuleName -match "^Form_|^frm") {
+            $clsFolder = Join-Path -Path $ModulesPath -ChildPath "forms"
+            if (-not (Test-Path -Path $clsFolder)) {
+                New-Item -Path $clsFolder -ItemType Directory -Force | Out-Null
+            }
+            $clsPath = Join-Path -Path $clsFolder -ChildPath ($ModuleName + ".cls")
+            $codeModule = $component.CodeModule
+            if ($codeModule -and $codeModule.CountOfLines -gt 0) {
+                $codeLines = $codeModule.Lines(1, $codeModule.CountOfLines)
+                Write-Utf8NoBom -Path $clsPath -Text $codeLines
+            }
+        }
     } finally {
         if ($tmp -and (Test-Path -Path $tmp)) { Remove-Item -Path $tmp -Force -ErrorAction SilentlyContinue }
         if ($component) { try { [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($component) | Out-Null } catch {} }
@@ -496,17 +643,20 @@ function Resolve-ImportFileForModule {
     $modulesPathText = [string]$ModulesPath
     $moduleNameText = [string]$ModuleName
 
-    $candidates = @(
-        (Join-Path -Path $modulesPathText -ChildPath ($moduleNameText + ".bas"))
-        (Join-Path -Path $modulesPathText -ChildPath ($moduleNameText + ".cls"))
-        (Join-Path -Path $modulesPathText -ChildPath ($moduleNameText + ".frm"))
-    )
+    $subFolders = @("classes", "forms", "modules", "")
+    $extensions = @(".cls", ".form.txt", ".frm", ".bas")
 
-    foreach ($c in $candidates) {
-        if (Test-Path -Path $c) { return $c }
+    foreach ($folder in $subFolders) {
+        $searchPath = if ($folder) { Join-Path -Path $modulesPathText -ChildPath $folder } else { $modulesPathText }
+        if (-not (Test-Path -Path $searchPath)) { continue }
+
+        foreach ($ext in $extensions) {
+            $candidate = Join-Path -Path $searchPath -ChildPath ($moduleNameText + $ext)
+            if (Test-Path -Path $candidate) { return $candidate }
+        }
     }
 
-    $any = Get-ChildItem -Path $modulesPathText -File -Include "*.bas", "*.cls", "*.frm" -ErrorAction SilentlyContinue |
+    $any = Get-ChildItem -Path $modulesPathText -File -Recurse -Include "*.bas", "*.cls", "*.frm" -ErrorAction SilentlyContinue |
         Where-Object { $_.BaseName -ieq $moduleNameText } |
         Sort-Object -Property Extension |
         Select-Object -First 1
@@ -631,8 +781,8 @@ function Fix-EncodingInAccess {
             $c = $components.Item($i)
             try {
                 $type = [int]$c.Type
-                if ($type -ne 1 -and $type -ne 2 -and $type -ne 100) { continue }
-                $ext = Get-ComponentExtension -Component $c
+                if ($type -ne 1 -and $type -ne 2 -and $type -ne 100 -and $type -ne 3) { continue }
+                $ext = Get-ComponentExtension -Component $c -ModuleName $c.Name
                 if ($ext) { $names += $c.Name }
             } finally {
                 try { [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($c) | Out-Null } catch {}
@@ -683,7 +833,7 @@ try {
             for ($i = 1; $i -le $components.Count; $i++) {
                 $c = $components.Item($i)
                 try {
-                    $ext = Get-ComponentExtension -Component $c
+                    $ext = Get-ComponentExtension -Component $c -ModuleName $c.Name
                     if ($ext) { $targets += $c.Name }
                 } finally {
                     try { [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($c) | Out-Null } catch {}
@@ -750,7 +900,8 @@ try {
         $ErdPath = (Resolve-Path -Path $ErdPath).Path
         Write-Status -Message ("ERD Folder: {0}" -f $ErdPath) -Color Yellow
         
-        $mdFile = Join-Path -Path $ErdPath -ChildPath "Estructura_Datos.md"
+        $backendName = [System.IO.Path]::GetFileNameWithoutExtension($BackendPath)
+        $mdFile = Join-Path -Path $ErdPath -ChildPath ($backendName + ".md")
         
         Export-DataStructure -DatabasePath $BackendPath -OutputPath $mdFile -Password $Password
         
