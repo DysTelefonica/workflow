@@ -16,6 +16,7 @@
 #   diario-sesion/SKILL.md
 #   diario-sesion/references/diario_template.md
 #   rfc-writer/SKILL.md  (opcional)
+#   access-vba-sync/SKILL.md + cli.js + handler.js + VBAManager.ps1 + package.json
 #   templates/
 #     AGENTS_template.md
 #
@@ -126,6 +127,18 @@ function Deploy-Framework($SD, $RD) {
         Write-Host "  [·] rfc-writer no encontrado — omitido" -ForegroundColor DarkGray
     }
 
+    # access-vba-sync
+    Write-Host "`n--- 🔄 ACCESS-VBA-SYNC ---" -ForegroundColor Yellow
+    @(
+        "SKILL.md",
+        "cli.js",
+        "handler.js",
+        "VBAManager.ps1",
+        "package.json"
+    ) | ForEach-Object {
+        Copy-SF "skills/access-vba-sync/$_"   "$SD/access-vba-sync/$_"
+    }
+
     Write-Host "`n--- 📄 TEMPLATES ---" -ForegroundColor Yellow
     Copy-SF "templates/AGENTS_template.md"   "docs/templates/AGENTS_template.md"
 }
@@ -221,6 +234,7 @@ Write-Host "`n--- 📂 CARPETAS ---" -ForegroundColor Yellow
     "$SD/hotfix",
     "$SD/diario-sesion/references",
     "$SD/rfc-writer",
+    "$SD/access-vba-sync",
     "docs/PRD",
     "docs/specs/active",
     "docs/specs/completed",
@@ -240,7 +254,42 @@ Write-Host "`n--- 📂 CARPETAS ---" -ForegroundColor Yellow
 # 5. Copiar framework
 Deploy-Framework $SD $RD
 
-# 6. Generar AGENTS.md
+# 6. npm install en access-vba-sync
+Write-Host "`n--- 📦 ACCESS-VBA-SYNC (npm install) ---" -ForegroundColor Yellow
+$SyncDir = "$SD/access-vba-sync"
+if (Test-Path "$SyncDir/package.json") {
+    Push-Location $SyncDir
+    npm install --silent 2>&1 | Out-Null
+    Pop-Location
+    Write-Host "  [✓] Dependencias instaladas en $SyncDir" -ForegroundColor Green
+} else {
+    Write-Host "  [!] package.json no encontrado — omitido" -ForegroundColor Yellow
+}
+
+# 7. Export inicial de módulos VBA
+Write-Host "`n--- 📤 EXPORT INICIAL (access-vba-sync start) ---" -ForegroundColor Yellow
+if ($null -ne $Frontend -and (Test-Path "$SyncDir/cli.js")) {
+    node "$SyncDir/cli.js" start --access "$($Frontend.FullName)"
+    Write-Host "  [✓] Módulos exportados a src/" -ForegroundColor Green
+} else {
+    Write-Host "  [·] Omitido (no hay .accdb o access-vba-sync no instalado)" -ForegroundColor DarkGray
+    Write-Host "       Ejecuta manualmente: node $SyncDir/cli.js start" -ForegroundColor DarkGray
+}
+
+# 8. Generar ERD
+Write-Host "`n--- 🗂️  ERD (access-vba-sync generate-erd) ---" -ForegroundColor Yellow
+$Backend = $Files | Where-Object { $_.Extension -match "acc" -and $_.Name -match "_[Dd]atos" } | Select-Object -First 1
+if ($null -ne $Backend -and (Test-Path "$SyncDir/cli.js")) {
+    node "$SyncDir/cli.js" generate-erd --backend "$($Backend.FullName)"
+    Write-Host "  [✓] ERD generado en ERD/" -ForegroundColor Green
+} elseif ($null -eq $Backend) {
+    Write-Host "  [·] No se encontró *_Datos.accdb — omitido" -ForegroundColor DarkGray
+    Write-Host "       Ejecuta manualmente: node $SyncDir/cli.js generate-erd --backend <ruta>" -ForegroundColor DarkGray
+} else {
+    Write-Host "  [·] access-vba-sync no disponible — omitido" -ForegroundColor DarkGray
+}
+
+# 9. Generar AGENTS.md
 Write-Host "`n--- 🤖 AGENTS.MD ---" -ForegroundColor Yellow
 $AgentsTemplate = "docs/templates/AGENTS_template.md"
 
@@ -259,7 +308,7 @@ if (Test-Path $AgentsTemplate) {
     Write-Host "       Comprueba que existe en: $SourcePath\templates\AGENTS_template.md" -ForegroundColor Yellow
 }
 
-# 7. Crear project_context.md desde plantilla (solo si no existe)
+# 10. Crear project_context.md desde plantilla (solo si no existe)
 Write-Host "`n--- 📋 PROJECT_CONTEXT.MD ---" -ForegroundColor Yellow
 $CtxTemplate = "$SD/prd-writer/references/project_context_template.md"
 $CtxDest     = "references/project_context.md"
@@ -277,7 +326,7 @@ if (!(Test-Path $CtxDest)) {
     Write-Host "  [→] Ya existe — sin cambios" -ForegroundColor Gray
 }
 
-# 8. Prompt de arranque
+# 11. Prompt de arranque
 Write-Host "`n--- 🔍 ARRANQUE ---" -ForegroundColor Yellow
 $gen = Read-Host "¿Mostrar prompt de arranque del autodescubrimiento? (S/N)"
 
@@ -311,4 +360,5 @@ Write-Host "  Fuente : $SourcePath" -ForegroundColor White
 Write-Host "`n  Próximos pasos:" -ForegroundColor Yellow
 Write-Host "  1. Revisa AGENTS.md" -ForegroundColor Gray
 Write-Host "  2. Reinicia Trae (carga rules y skills)" -ForegroundColor Gray
-Write-Host "  3. Copia el prompt de arranque al agente`n" -ForegroundColor Gray
+Write-Host "  3. Verifica src/ y ERD/ generados" -ForegroundColor Gray
+Write-Host "  4. Copia el prompt de arranque al agente`n" -ForegroundColor Gray
