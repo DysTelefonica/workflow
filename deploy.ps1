@@ -240,9 +240,6 @@ Write-Host "`n--- 📂 CARPETAS ---" -ForegroundColor Yellow
     "docs/specs/completed",
     "docs/templates",
     "references",
-    "src/clases",
-    "src/modulos",
-    "src/formularios",
     ".engram"
 ) | ForEach-Object {
     if (!(Test-Path $_)) {
