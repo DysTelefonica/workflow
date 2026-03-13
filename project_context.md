@@ -1,154 +1,286 @@
 # {NOMBRE_PROYECTO} — Project Context
 
-> Este archivo es leído por la skill `prd-writer` antes de generar cualquier PRD.
-> Contiene todo el vocabulario específico del proyecto para que la skill pueda
-> operar sin rutas ni convenciones hardcodeadas.
+> Este archivo define el **contexto técnico completo del proyecto**.
+> Es leído por varias skills del sistema (especialmente `prd-writer` y `spec-writer`)
+> para generar documentación técnica consistente sin rutas ni convenciones hardcodeadas.
+
+Este documento describe:
+
+- estructura del repositorio
+- stack tecnológico
+- arquitectura
+- convenciones del proyecto
+- workflow de desarrollo
 
 ---
 
-## 1. Rutas del proyecto
+# 1. Estructura del repositorio
 
 | Recurso | Ruta |
-| :--- | :--- |
+|-------|------|
 | Código fuente — formularios | `src/formularios/` |
 | Código fuente — clases | `src/clases/` |
 | Código fuente — módulos | `src/modulos/` |
 | PRDs | `docs/PRD/` |
+| Specs activas | `docs/specs/active/` |
+| Specs completadas | `docs/specs/completed/` |
 | DISCOVERY_MAP | `docs/DISCOVERY_MAP.md` |
 | DEUDA_TECNICA | `docs/DEUDA_TECNICA.md` |
 | Diario de sesiones | `docs/Diario_Sesiones.md` |
-| Plantilla PRD | `.trae/skills/prd-writer/references/prd_template.md` |
 | Modelo de datos | `references/Estructura_Datos.md` |
-| Specs activas | `docs/specs/active/` |
-| Specs completadas | `docs/specs/completed/` |
 
 ---
 
-## 2. Stack tecnológico
+# 2. Infraestructura del agente
+
+El proyecto utiliza un sistema de desarrollo asistido por IA basado en **skills y memoria persistente**.
+
+| Recurso | Ruta |
+|-------|------|
+| Configuración del agente | `.agent/AGENTS.md` |
+| Reglas globales del agente | `.agent/rules/` |
+| Skills del agente | `.agent/skills/` |
+| Memoria Engram | `.agent/engram/` |
+
+Las skills principales que interactúan con este proyecto son:
+
+- `sdd-protocol`
+- `prd-writer`
+- `spec-writer`
+- `access-vba-sync`
+- `hotfix`
+- `rfc-writer`
+
+---
+
+# 3. Stack tecnológico
 
 | Elemento | Valor |
-| :--- | :--- |
+|-------|------|
 | Lenguaje | VBA |
-| Base de datos principal | {nombre}.accdb |
-| Bases de datos adicionales | {nombre_backend}.accdb, {nombre_externa}.accdb |
+| Entorno | Microsoft Access |
 | Motor de datos | DAO |
-| Entorno | Microsoft Access {versión} |
+| Frontend | Formularios Access |
+| Backend | Base de datos Access |
+
+Bases de datos del proyecto:
+
+| Tipo | Archivo |
+|-----|------|
+| Frontend | `{nombre}.accdb` |
+| Backend principal | `{nombre_backend}.accdb` |
+| Backend externos | `{nombre_externa}.accdb` |
 
 ---
 
-## 3. Tabla de tipos de base de datos
+# 4. Arquitectura del proyecto
 
-Usar esta tabla para traducir códigos numéricos a tipos legibles en los PRDs.
-**Nunca documentar el código numérico crudo en una tabla de campos.**
-
-| Código | Tipo Access | Notas |
-| :--- | :--- | :--- |
-| 1 | Boolean (Sí/No) | — |
-| 3 | Integer | 2 bytes, rango -32768 a 32767 |
-| 4 | Long Integer | 4 bytes, usado para PKs autonuméricas |
-| 6 | Single | Coma flotante simple precisión |
-| 7 | Double | Coma flotante doble precisión — campos monetarios en este proyecto |
-| 8 | Date/Time | Fecha y hora combinadas |
-| 10 | Text(N) | Longitud máxima = valor del campo Longitud en Estructura_Datos.md |
-| 12 | Memo | Texto largo sin límite práctico |
-
----
-
-## 4. Convenciones de nomenclatura
-
-### Tablas de base de datos
-
-| Tipo | Patrón | Ejemplo |
-| :--- | :--- | :--- |
-| Tabla principal | `Tb` + PascalCase | `TbEventos` |
-| Tabla auxiliar / staging | `TbAux` + PascalCase | `TbAuxEventos` |
-| IDs de entidad | `ID` + NombreEntidad singular | `IDEvento`, `IDActividad` |
-
-### Código VBA
-
-| Elemento | Patrón | Ejemplo |
-| :--- | :--- | :--- |
-| Clases | PascalCase | `Usuario`, `Evento` |
-| Módulos | PascalCase + `.bas` | `Constructor.bas` |
-| Formularios (archivo código) | `Form_` + nombre + `.cls` | `Form_FormEventoGestion.cls` |
-| Formularios (archivo controles) | nombre + `.frm.txt` | `FormEventoGestion.frm.txt` |
-| Funciones públicas | PascalCase | `ObtenerEvento` |
-| Variables locales | camelCase | `idEventoActual` |
-| Constantes | UPPER_SNAKE_CASE | `MAX_REINTENTOS` |
-
-### Controles de formulario
-
-| Prefijo | Tipo de control |
-| :--- | :--- |
-| `btn` | CommandButton |
-| `txt` | TextBox |
-| `cmb` | ComboBox |
-| `lst` | ListBox |
-| `lbl` | Label |
-| `frm` | SubForm |
-
----
-
-## 5. Arquitectura del proyecto
-
-### Capas
+El proyecto sigue una arquitectura **en tres capas**.
 
 | Capa | Ubicación | Responsabilidad |
-| :--- | :--- | :--- |
-| UI | `src/formularios/` | Formularios Access, eventos de usuario |
-| Negocio | `src/clases/` | Lógica de negocio, validaciones, cálculos |
-| Datos | `src/modulos/` | Acceso a BD via DAO, SQL, repositorios |
+|----|------|------|
+| UI | `src/formularios/` | Formularios Access, interacción con usuario |
+| Negocio | `src/clases/` | Lógica de negocio, validaciones |
+| Datos | `src/modulos/` | Acceso a datos DAO y SQL |
 
-### Patrón general
-```
-Formulario (Form_X.cls)
-  → instancia clase de negocio en Form_Open
-  → destruye clase en Form_Close
-  → llama métodos de negocio en eventos de controles
-    → clase de negocio llama módulos DAO
-      → módulos DAO ejecutan SQL contra BD
-```
-
-### Variables globales
-
-| Variable | Tipo | Descripción |
-| :--- | :--- | :--- |
-| `{nombre}` | `{Clase}` | {descripción} |
+### Flujo típico
+Formulario
+→ instancia clase de negocio
+→ ejecuta método de negocio
+→ módulo de datos
+→ consulta SQL
 
 ---
 
-## 6. Gestión de errores
+# 5. Convenciones de nomenclatura
+
+## Tablas
+
+| Tipo | Patrón | Ejemplo |
+|----|----|----|
+| Tabla principal | `Tb` + PascalCase | `TbEventos` |
+| Tabla auxiliar | `TbAux` + PascalCase | `TbAuxEventos` |
+| Identificadores | `ID` + Entidad | `IDEvento` |
+
+---
+
+## Código VBA
 
 | Elemento | Convención |
-| :--- | :--- |
+|------|------|
+| Clases | PascalCase |
+| Módulos | PascalCase |
+| Formularios | `Form_` + nombre |
+| Funciones públicas | PascalCase |
+| Variables locales | camelCase |
+| Constantes | UPPER_SNAKE_CASE |
+
+---
+
+## Controles de formulario
+
+| Prefijo | Tipo |
+|------|------|
+| `btn` | botón |
+| `txt` | textbox |
+| `cmb` | combo |
+| `lst` | lista |
+| `lbl` | label |
+| `frm` | subformulario |
+
+---
+
+# 6. Tipos de datos Access
+
+Para documentar PRDs se utiliza la siguiente traducción:
+
+| Código | Tipo |
+|------|------|
+| 1 | Boolean |
+| 3 | Integer |
+| 4 | Long |
+| 6 | Single |
+| 7 | Double |
+| 8 | Date/Time |
+| 10 | Text |
+| 12 | Memo |
+
+Nunca documentar el código numérico en PRDs.
+
+---
+
+# 7. Gestión de errores
+
+| Tipo | Implementación |
+|----|----|
 | Errores de negocio | `Err.Raise 1000+` |
-| Mensajes al usuario | `MsgBox` con código `MSG-XX` |
-| Logging | `Debug.Print` (sin sistema estructurado) |
-| Parámetro de error en firmas | `Optional ByRef p_Error As String` |
+| Mensajes usuario | `MsgBox` |
+| Logging | `Debug.Print` |
+| Propagación error | `Optional ByRef p_Error As String` |
 
 ---
 
-## 7. Valores enumerados globales
+# 8. Integraciones externas
 
-Valores que se repiten en varias tablas y módulos del proyecto:
-
-| Nombre | Valores posibles |
-| :--- | :--- |
-| {NombreEnum} | `"VALOR1"` \| `"VALOR2"` \| `"VALOR3"` |
+| Sistema | Descripción | Punto de entrada |
+|------|------|------|
+| {sistema} | {descripción} | {método o variable} |
 
 ---
 
-## 8. Integraciones externas
+# 9. Workflow de desarrollo (SDD)
 
-| Sistema | Cómo se integra | Variable / Punto de entrada |
-| :--- | :--- | :--- |
-| {nombre sistema} | {descripción} | {variable o método} |
+El proyecto utiliza **Specification Driven Development**.
+
+Flujo:
+Historia de usuario
+↓
+Spec
+↓
+STOP aprobación
+↓
+Implementación
+↓
+Validación
+
+Reglas:
+
+- Nunca escribir código sin Spec aprobada.
+- Toda modificación debe tener una Spec.
 
 ---
 
-## 9. Notas de contexto para PRDs
+# 10. Workflow Git
 
-Información que el generador de PRDs debe tener en cuenta para este proyecto específico:
+El proyecto sigue un **Git Flow simplificado**.
 
-- {nota relevante 1}
-- {nota relevante 2}
+| Rama | Uso |
+|----|----|
+| main | código en producción |
+| develop | integración de features |
+| spec branches | implementación de specs |
+
+Convención de ramas:
+spec-XXX-descripcion
+Ejemplo:
+spec-042-fix-calculo-importes
+
+---
+
+# 11. Sistema de releases
+
+Las releases se etiquetan con el formato:
+YYYY-NNN
+
+Ejemplo:
+2026-003
+Hotfixes:
+YYYY-NNN.1
+Ejemplo:
+2026-003.1
+
+---
+
+# 12. Deployment en producción
+
+Arquitectura de ejecución:
+Servidor
+├─ Backend.accdb
+└─ recursos/
+└─ Aplicacion.accde
+
+
+Los usuarios ejecutan la aplicación desde **copias locales**.
+
+Directorio local típico:
+
+
+%APPDATA%\Aplicaciones_Dys{Aplicacion}
+
+
+Flujo:
+
+1. Lanzadera verifica versión.
+2. Si hay versión nueva → copia archivos desde servidor.
+3. Usuario ejecuta frontend local.
+
+Esto evita bloqueos de archivos compartidos.
+
+---
+
+# 13. Rollback
+
+Las versiones anteriores del frontend se almacenan en:
+
+
+versions/
+
+
+Si una release falla:
+
+1. se recompila ACCDE de una versión anterior
+2. se publica como nueva versión
+3. la lanzadera obliga actualización.
+
+---
+
+# 14. Notas para generación de PRDs
+
+Al generar PRDs el agente debe:
+
+- usar las rutas de este documento
+- respetar convenciones de nombres
+- documentar solo campos reales del modelo de datos
+- evitar duplicar información existente
+
+---
+
+# 15. Notas de dominio del proyecto
+
+Añadir aquí cualquier conocimiento específico del dominio.
+
+Ejemplos:
+
+- reglas de negocio
+- restricciones de datos
+- convenciones históricas del proyecto
