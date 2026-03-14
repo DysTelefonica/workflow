@@ -52,30 +52,21 @@ Leer código sin entender arquitectura genera inconsistencias.
 
 # 3. Descubrimiento de Skills
 
-Las skills disponibles se encuentran en:
+Resolver `SKILLS_DIR` con este orden:
+1. `.agents/skills/`
+2. `skills/`
+3. `.agent/skills/`
 
-
-.agent/skills
-
-
-Cada subcarpeta dentro de este directorio corresponde a **una skill independiente**.
-
-Estructura estándar de una skill:
-
-
-.agent/skills/
-skill-name/
-SKILL.md
-references/
-scripts/
-
+Cada subcarpeta dentro de `SKILLS_DIR` corresponde a **una skill independiente**.
 
 Regla:
 
-Antes de asumir que una habilidad no existe, el agente debe revisar el contenido de:
+Antes de asumir que una habilidad no existe, el agente debe revisar el contenido de `SKILLS_DIR`.
 
+Regla crítica:
 
-.agent/skills
+Si la carpeta de una skill existe en `SKILLS_DIR`, el agente NO puede responder "skill no disponible"
+sin leer antes `SKILLS_DIR/<skill>/SKILL.md`.
 
 
 ---
@@ -121,6 +112,24 @@ Nunca escribir código antes de que exista una **Spec aprobada**.
 El **STOP 1 del protocolo SDD es obligatorio**.
 
 El agente nunca debe implementar código sin que el usuario haya aprobado explícitamente la Spec.
+
+---
+
+# 6.1 Entregables obligatorios para RFC y Plan
+
+Si se activa `rfc-writer`, el RFC debe crearse como archivo en:
+
+`docs/rfcs/RFC-{NNN}_{slug}.md`
+
+Si se activa `plan-writer`, el plan debe crearse como archivo en:
+
+`docs/plans/active/plan-{NNN}-{slug}/PLAN_{NNN}_{Titulo}.md`
+
+No se considera completado si el contenido queda solo en chat.
+
+Siempre devolver al usuario:
+- ruta exacta del archivo creado
+- resumen ejecutivo breve
 
 ---
 
@@ -217,7 +226,7 @@ pero **no implementarlo sin aprobación explícita**.
 Antes de cualquier `mem_save` aplicar la regla:
 
 
-.agent/rules/engram-memory-quality.md
+rules/engram-memory-quality.md (o `RULES_DIR/engram-memory-quality.md`)
 
 
 Guardar solo:

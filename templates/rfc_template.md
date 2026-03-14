@@ -1,6 +1,6 @@
 # RFC-{NNN}: {Título del cambio de arquitectura}
 
-**Estado:** `Borrador` | `En revisión` | `Aprobado` | `Rechazado` | `Implementado`
+**Estado:** `Borrador`
 **Fecha:** {YYYY-MM-DD}
 **Autor:** {nombre o rol}
 **Specs relacionadas:** Spec-XXX, Spec-YYY (si las hay)
@@ -93,7 +93,7 @@
 ---
 
 > **Cómo usar esta plantilla**
-> 1. Crea el archivo en `docs/RFC/RFC-{NNN}_{slug}.md`
+> 1. Crea el archivo en `docs/rfcs/RFC-{NNN}_{slug}.md`
 > 2. Completa las secciones — omite solo las que genuinamente no aplican (indica "N/A")
 > 3. Comparte con el equipo para revisión antes de generar las Specs
 > 4. Una vez aprobado, actualiza el estado y crea las Specs correspondientes

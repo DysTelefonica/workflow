@@ -151,9 +151,15 @@ Aunque el descubrimiento es automático, las siguientes skills forman el **núcl
 - `sdd-protocol` — Orquestador del desarrollo
 - `spec-writer` — Generación de Specs
 - `prd-writer` — Generación y mantenimiento de PRDs
+- `plan-writer` — Plan de Actuación para Epics
 - `hotfix` — Gestión de bugs urgentes
 - `rfc-writer` — Cambios de arquitectura
 - `access-vba-sync` — Sincronización Access ↔ código
+
+Regla crítica de skills:
+
+Si una skill existe en `{{SKILLS_DIR}}`, no se puede responder "skill no disponible"
+sin leer antes `{{SKILLS_DIR}}/<skill>/SKILL.md`.
 
 ## sdd-protocol
 
