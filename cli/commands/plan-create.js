@@ -10,8 +10,9 @@ module.exports = function(planNumber) {
   }
 
   const folders = fs.readdirSync(plansDir)
+  const exactPlanPrefix = new RegExp(`^plan-${String(planNumber)}(?:-|$)`)
 
-  const plan = folders.find(f => f.startsWith(`plan-${planNumber}`))
+  const plan = folders.find(f => exactPlanPrefix.test(f))
 
   if (!plan) {
     console.log("Plan not found in docs/plans/active/")

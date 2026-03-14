@@ -12,6 +12,9 @@
   "bin": {
     "dysflow": "./cli/workflow.js"
   },
+  "scripts": {
+    "test": "node --test"
+  },
   "dependencies": {
     "commander": "^14.0.3"
   }

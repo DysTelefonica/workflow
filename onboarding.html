@@ -544,8 +544,8 @@
 
             <!-- INSTALACIÓN -->
             <div id="inst" class="tab-content">
-                <h3>🚀 Instalación con npx</h3>
-                <p>Dysflow se ejecuta directamente desde GitHub usando <code>npx</code>. No necesitas clonar ni instalar nada localmente.</p>
+                <h3>🚀 Instalación desde GitHub (sin npx)</h3>
+                <p>Instala Dysflow clonando el repositorio y registrando la CLI localmente con Node.js.</p>
 
                 <div class="step">
                     <div class="step-number">1</div>
@@ -562,14 +562,30 @@
                 <div class="step">
                     <div class="step-number">2</div>
                     <div class="step-content">
-                        <h4>¡Listo! No hay más pasos</h4>
-                        <p>Dysflow se ejecuta directamente con <code>npx</code>.</p>
+                        <h4>Clonar e instalar dependencias</h4>
+                        <div class="command-box">
+                            <span class="prompt">PS&gt;</span>
+                            <span class="command">git clone https://github.com/DysTelefonica/workflow.git dysflow-framework</span>
+                        </div>
+                        <div class="command-box">
+                            <span class="prompt">PS&gt;</span>
+                            <span class="command">cd dysflow-framework</span>
+                        </div>
+                        <div class="command-box">
+                            <span class="prompt">PS&gt;</span>
+                            <span class="command">npm install</span>
+                        </div>
+                        <div class="command-box">
+                            <span class="prompt">PS&gt;</span>
+                            <span class="command">npm link</span>
+                        </div>
+                        <p>Con esto tendrás disponible el comando <code>dysflow</code> en tu terminal.</p>
                     </div>
                 </div>
 
                 <div class="card info">
-                    <h4>💡 ¿Por qué npx?</h4>
-                    <p><code>npx</code> descarga y ejecuta el paquete sobre la marcha. Siempre tendrás la última versión sin necesidad de actualizar.</p>
+                    <h4>💡 Nota</h4>
+                    <p>Si no quieres hacer <code>npm link</code>, también puedes ejecutar la CLI con <code>node cli/workflow.js --help</code> desde la carpeta del repositorio.</p>
                 </div>
             </div>
 
@@ -580,7 +596,7 @@
                 
                 <div class="command-box">
                     <span class="prompt">PS&gt;</span>
-                    <span class="command">npx github:DysTelefonica/workflow --help</span>
+                    <span class="command">dysflow --help</span>
                 </div>
 
                 <p>Deberías ver:</p>
@@ -613,16 +629,16 @@ Commands:
                     <h4>Crear estructura base</h4>
                     <div class="command-box">
                         <span class="prompt">PS&gt;</span>
-                        <span class="command">npx github:DysTelefonica/workflow init access</span>
+                            <span class="command">dysflow init access</span>
+                        </div>
                     </div>
                 </div>
-            </div>
 
             <div class="step">
                 <div class="step-number">2</div>
                 <div class="step-content">
-                    <h4>Editar project_context.md</h4>
-                    <p>Abre el archivo <code>project_context.md</code> en la raíz y configura:</p>
+                    <h4>Editar project_context</h4>
+                    <p>Abre el archivo <code>references/project_context.md</code> y configura:</p>
                     <ul>
                         <li>Nombre del proyecto</li>
                         <li>Rutas de los archivos Access</li>
@@ -633,11 +649,8 @@ Commands:
 
             <h3>📁 Estructura creada</h3>
             <pre>MiProyecto/
-├── .agent/
-│   ├── AGENTS.md
-│   ├── rules/
-│   └── skills/
-├── docs/
+ ├── AGENTS.md
+ ├── docs/
 │   ├── PRD/
 │   ├── specs/
 │   │   ├── active/
@@ -649,14 +662,17 @@ Commands:
 │   ├── DISCOVERY_MAP.md
 │   ├── DEUDA_TECNICA.md
 │   └── Diario_Sesiones.md
-├── src/
-│   ├── clases/
-│   ├── modulos/
-│   └── formularios/
-├── references/
-├── .engram/
-├── CHANGELOG.md
-└── project_context.md</pre>
+ ├── src/
+ │   ├── clases/
+ │   ├── modulos/
+ │   └── formularios/
+ ├── skills/ o .agents/skills/
+ ├── rules/ o .agents/rules/
+ ├── references/
+ │   └── project_context.md
+ ├── .engram/
+ ├── CHANGELOG.md
+ └── (otros archivos del proyecto)</pre>
         </section>
 
         <!-- FLUJO SDD -->
@@ -848,7 +864,7 @@ Commands:
                             <h4>Crear rama hotfix</h4>
                             <div class="command-box">
                                 <span class="prompt">PS&gt;</span>
-                                <span class="command">npx github:DysTelefonica/workflow hotfix fix-huerfanos-inspeccion</span>
+                                <span class="command">dysflow hotfix fix-huerfanos-inspeccion</span>
                             </div>
                             <p>Crea rama <code>hotfix-fix-huerfanos-inspeccion</code> desde <code>main</code>.</p>
                         </div>
@@ -1018,10 +1034,10 @@ Commands:
 
             <div class="card info">
                 <h4>📌 Cómo ejecutar los comandos</h4>
-                <p>Usa <code>npx github:DysTelefonica/workflow</code> seguido del comando:</p>
+                <p>Usa el comando <code>dysflow</code> directamente (tras <code>npm link</code>):</p>
                 <div class="command-box">
                     <span class="prompt">PS&gt;</span>
-                    <span class="command">npx github:DysTelefonica/workflow init access</span>
+                    <span class="command">dysflow init access</span>
                 </div>
             </div>
 
@@ -1251,14 +1267,14 @@ Commands:
         </section>
 
         <!-- PRÓXIMOS PASOS -->
-        <section class="card success" id=" proximos-pasos">
+        <section class="card success" id="proximos-pasos">
             <h2>✅ ¡Listo para empezar!</h2>
             <p>Ahora que conoces Dysflow, estos son los siguientes pasos:</p>
             <div class="checklist">
                 <li>Inicializar un proyecto: <code>dysflow init access</code></li>
-                <li>Leer el <code>project_context.md</code> y personalizarlo</li>
+                <li>Leer <code>references/project_context.md</code> y personalizarlo</li>
                 <li>Probar el flujo SDD con una historia de usuario pequeña</li>
-                <li>Configurar el agente IA en <code>.agent/AGENTS.md</code></li>
+                <li>Configurar el agente IA en <code>AGENTS.md</code></li>
             </div>
             <p style="margin-top: 20px;"><strong>¿Tienes dudas?</strong> Revisa este onboarding de nuevo o pregunta a tu equipo.</p>
         </section>
