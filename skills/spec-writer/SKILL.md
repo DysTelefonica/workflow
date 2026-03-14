@@ -27,7 +27,7 @@ Esta skill NO tiene rutas hardcodeadas. Leer `references/project_context.md`
 para obtener las rutas reales de `src/`, `docs/`, `docs/PRD/`, `docs/specs/` y `docs/DEUDA_TECNICA.md`.
 
 La plantilla de Spec está en:
-`{ruta_de_esta_skill}/references/spec_template.md`
+`{ruta_de_esta_skill}/references/SPEC-TEMPLATE.md`
 
 ---
 
@@ -74,17 +74,30 @@ En este orden:
 
 ### Paso 3 — Escribir la Spec siguiendo la plantilla
 
-**OBLIGATORIO**: leer `{ruta_de_esta_skill}/references/spec_template.md` antes de escribir.
+**OBLIGATORIO**: leer `{ruta_de_esta_skill}/references/SPEC-TEMPLATE.md` antes de escribir.
 Seguir la estructura exacta de secciones de la plantilla. No inventar secciones nuevas.
+
+Reglas obligatorias de contenido (anti-placeholder):
+1. No se permite crear Specs solo con cabecera/estado.
+2. Cada Spec debe incluir contenido real en secciones 1 a 9 de la plantilla.
+3. Debe incluir archivos concretos en la seccion 3.2 y criterios verificables en 5.x.
+4. Debe incluir al menos un escenario de validacion en Access (5.2).
+5. Si hay cambios de UI, completar seccion 6; si no, indicar explicitamente "Sin cambios de UI".
+6. No dejar placeholders (`[ ... ]`, `AAAA-MM-DD`, `Spec-NNN`, `[...]`, `Por determinar`) en version entregada.
 
 ---
 
 ### Paso 4 — Numerar, guardar y registrar en Engram
 
+Preflight obligatorio:
+- Si no existe `docs/specs/active/`, crearla.
+- Si no existe `docs/specs/completed/`, crearla.
+
 1. Escanear `docs/specs/active/` y `docs/specs/completed/` → usar el siguiente número disponible.
 2. Crear carpeta: `docs/specs/active/spec-{NNN}-{slug}/`
 3. Guardar: `docs/specs/active/spec-{NNN}-{slug}/Spec-{NNN}_{Titulo}.md`
-4. Guardar en Engram aplicando `{RULES_DIR}/engram-memory-quality.md` antes del `mem_save`:
+4. Verificar que el archivo existe y tiene contenido completo (secciones 1-9 con contenido no placeholder).
+5. Guardar en Engram aplicando `{RULES_DIR}/engram-memory-quality.md` antes del `mem_save`:
    ```
    mem_save
      title: "Spec-{NNN}: [título breve] — [módulo principal]"
@@ -105,6 +118,16 @@ Presentar la Spec completa al usuario. Detenerse y esperar aprobación explícit
 
 Si el usuario pide cambios → modificar la Spec y volver a presentar.
 Si aprueba → el sdd-protocol continúa con la Fase 2.
+
+Respuesta minima obligatoria al usuario:
+- Ruta exacta del archivo creado/actualizado
+- Resumen de secciones completadas (1-9)
+- Lista de archivos objetivo de implementacion (seccion 3.2)
+
+Si la solicitud es generar multiples specs desde un Plan:
+- Crear TODAS las specs en archivo (no solo directorios, no solo cabeceras)
+- Confirmar `N/N specs creadas con contenido completo`
+- Si alguna queda incompleta, NO dar la tarea por finalizada
 
 ---
 

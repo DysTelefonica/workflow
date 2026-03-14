@@ -133,6 +133,28 @@ Siempre devolver al usuario:
 
 ---
 
+# 6.2 Entregables obligatorios para Specs
+
+Si se activa `spec-writer`, cada spec debe crearse como archivo en:
+
+`docs/specs/active/spec-{NNN}-{slug}/Spec-{NNN}_{Titulo}.md`
+
+No se considera completado si:
+- solo se crean carpetas vacias
+- el archivo tiene solo cabecera/estado
+- quedan placeholders sin resolver (`[ ... ]`, `AAAA-MM-DD`, `Spec-NNN`, etc.)
+
+Calidad minima por spec (obligatoria):
+- secciones 1 a 9 con contenido real
+- archivos objetivo concretos (seccion 3.2)
+- criterios verificables y validacion en Access (seccion 5)
+
+Siempre devolver al usuario:
+- ruta exacta de cada spec creada
+- confirmacion `N/N specs completas`
+
+---
+
 # 7. Integración con Git
 
 Cada Spec se implementa en una rama independiente.

@@ -1,6 +1,6 @@
 # 📝 Spec-[NNN]: [Título corto y descriptivo]
 
-**Estado:** 🔵 ABIERTA | 🟡 EN PROGRESO | ✅ CERRADA | ⛔ CANCELADA | 🔴 BLOQUEADA
+**Estado:** 🔵 ABIERTA
 **Prioridad:** Crítica | Alta | Media | Baja
 **Tipo:** Nueva Funcionalidad | Corrección | Refactoring | Deuda Técnica | Mejora UX
 **Módulos PRD afectados:** [IDs o nombres separados por coma, ej: PRD-03, PRD-07]
@@ -11,6 +11,10 @@
 **Cierre:** [AAAA-MM-DD — Motivo] | Pendiente
 
 ---
+
+> **Regla anti-placeholder (obligatoria):**
+> No dejar este archivo con solo cabecera. Completar secciones 1 a 9 con contenido real
+> antes de presentar la Spec. Si no hay cambios de UI, indicar explicitamente "Sin cambios de UI".
 
 ## 1. Resumen Técnico
 
