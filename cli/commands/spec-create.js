@@ -8,7 +8,7 @@ module.exports = function(specNumber) {
 
   if(!spec){
     console.log("Spec not found")
-    process.exit()
+    process.exit(1)
   }
 
   const branch = spec

@@ -94,20 +94,23 @@ MiProyecto/
 │   ├── PRD/                # Documentos de Requisitos
 │   ├── specs/
 │   │   ├── active/         # Specs en desarrollo
-│   │   └── completed/     # Specs validadas
+│   │   └── completed/       # Specs validadas
+│   ├── plans/
+│   │   ├── active/         # Planes de actuación en desarrollo
+│   │   └── completed/      # Planes completados
 │   ├── ERD/                # Diagramas de datos
-│   ├── DISCOVERY_MAP.md   # Mapa del sistema
-│   ├── DEUDA_TECNICA.md   # Deuda técnica
-│   └── Diario_Sesiones.md # Registro de sesiones
+│   ├── DISCOVERY_MAP.md    # Mapa del sistema
+│   ├── DEUDA_TECNICA.md    # Deuda técnica
+│   └── Diario_Sesiones.md   # Registro de sesiones
 ├── src/
 │   ├── clases/             # Clases VBA
 │   ├── modulos/            # Módulos estándar
-│   └── formularios/       # Formularios
+│   └── formularios/        # Formularios
 ├── references/
 │   └── Estructura_Datos.md
 ├── .engram/                # Memoria persistente
 ├── CHANGELOG.md
-└── project_context.md      # Contexto del proyecto
+└── project_context.md       # Contexto del proyecto
 ```
 
 ### Paso 2: Configurar el contexto

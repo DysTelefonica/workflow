@@ -1,14 +1,21 @@
 const { git } = require("../utils/git")
+const fs = require("fs")
 
 module.exports = function(planNumber) {
+  const plansDir = "docs/plans/active"
+  if (!fs.existsSync(plansDir)) {
+    console.log("Error: El directorio docs/plans/active no existe.")
+    console.log("Ejecuta 'dysflow init access' primero.")
+    process.exit(1)
+  }
 
-  const folders = require("fs").readdirSync("docs/plans/active")
+  const folders = fs.readdirSync(plansDir)
 
   const plan = folders.find(f => f.startsWith(`plan-${planNumber}`))
 
   if (!plan) {
     console.log("Plan not found in docs/plans/active/")
-    process.exit()
+    process.exit(1)
   }
 
   const branch = plan
