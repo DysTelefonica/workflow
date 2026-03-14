@@ -82,14 +82,11 @@ module.exports = function updateAccess() {
   log("·", `Versión del paquete: ${pkgVersion}`)
 
   if (installedVersion === pkgVersion) {
-    console.log(`\n  ✅  Ya estás en la última versión (${pkgVersion}). Nada que actualizar.\n`)
-    return
-  }
-
-  if (installedVersion) {
+    console.log(`\n  Skills ya en v${pkgVersion} — sincronizando archivos de framework...\n`)
+  } else if (installedVersion) {
     console.log(`\n  Actualizando ${installedVersion} → ${pkgVersion}...\n`)
   } else {
-    console.log(`\n  Actualizando skills a v${pkgVersion}...\n`)
+    console.log(`\n  Sincronizando skills a v${pkgVersion}...\n`)
   }
 
   // 3. Actualizar solo archivos de framework
