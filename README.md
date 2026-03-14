@@ -467,6 +467,67 @@ git push -u origin develop
 
 ---
 
+## Desarrollo del Framework
+
+Esta sección documenta cómo extender Dysflow añadiendo nuevas skills.
+
+### Añadir una nueva skill
+
+1. **Crear la estructura** en `skills/`:
+   ```
+   skills/
+   └── nueva-skill/
+       ├── SKILL.md           # Descripción de la skill
+       ├── references/        # Documentación adicional
+       ├── scripts/           # Scripts si aplica
+       └── (otros archivos)
+   ```
+
+2. **No es necesario modificar ningún archivo JS** — `dysflow update` copia automáticamente toda la carpeta `skills/` al proyecto destino.
+
+### Si la nueva skill tiene dependencias npm
+
+Si tu skill necesita paquetes npm (como `access-vba-sync` usa `chokidar`):
+
+1. Crear `package.json` dentro de la skill con las dependencias
+2. Añadir el install en `installers/update-access.js` (líneas 107-116):
+   ```javascript
+   // npm install en nueva-skill
+   const nuevaSkillDir = path.join(cwd, skillsDir, "nueva-skill")
+   if (fs.existsSync(path.join(nuevaSkillDir, "package.json"))) {
+     try {
+       execSync("npm install --silent", { cwd: nuevaSkillDir, stdio: "inherit" })
+       log("✔", "Dependencias de nueva-skill actualizadas")
+     } catch (_) {
+       log("✗", "Error en npm install de nueva-skill")
+     }
+   }
+   ```
+
+### Estructura de una skill
+
+Cada skill sigue una estructura estándar:
+
+| Archivo/Directorio | Descripción |
+|-------------------|-------------|
+| `SKILL.md` | Descripción, objetivos y cuándo usarla |
+| `references/` | Plantillas y documentación de referencia |
+| `scripts/` | Scripts辅助 si la skill necesita automatización |
+
+### Actualizar versión
+
+Al hacer cambios en el framework, actualizar la versión en `package.json`:
+
+```json
+{
+  "version": "1.0.1"
+}
+```
+
+Esto permite a los usuarios ver qué versión tienen vs la nueva.
+
+---
+
 ## Recursos adicionales
 
 - [Documentación de access-vba-sync](skills/access-vba-sync/README.md)
