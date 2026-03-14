@@ -83,11 +83,33 @@ La IA ejecuta todo esto sin detenerse:
 
 4. Inspeccionar el código fuente en `src/` solo si el PRD no es suficiente.
 
+4b. **Detectar si la historia es una Epic** — si el análisis revela que la historia afecta a
+    **más de 3 módulos distintos** o tiene **más de 5 intervenciones independientes**, presentar
+    al usuario:
+
+    ```
+    Esta historia de usuario es amplia y puede beneficiarse de un Plan de Actuación.
+    ¿Prefieres:
+    A) Una sola Spec completa (flujo normal)
+    B) Un Plan de Actuación con múltiples Specs coordinadas
+    ```
+
+    - Si elige **A** → flujo normal, continuar en paso 5.
+    - Si elige **B** → activar `{SKILLS_DIR}/plan-writer/SKILL.md` para generar el Plan
+      antes de crear las Specs individuales. Seguir las instrucciones de plan-writer.
+
 5. Generar la Spec siguiendo `{SKILLS_DIR}/spec-writer/SKILL.md` y su plantilla.
 
 6. Guardar en `docs/specs/active/spec-{NNN}-{slug}/Spec-{NNN}_{Titulo}.md`.
 
 **Numeración:** escanear `docs/specs/` (active + completed) y usar el siguiente número disponible.
+
+7. **Crear rama Git**: indicar al usuario que ejecute:
+   ```
+   dysflow spec {NNN}
+   ```
+   Esto crea la rama `spec-{NNN}-{slug}` en GitHub desde `develop`.
+   El usuario debe ejecutarlo antes de pasar a implementación.
 
 ---
 
@@ -180,7 +202,8 @@ La IA ejecuta **todos estos pasos en orden sin detenerse:**
 | 5 | **Registrar en Diario**: activar `{SKILLS_DIR}/diario-sesion/SKILL.md` para añadir entrada **AL PRINCIPIO** de `docs/Diario_Sesiones.md`. **NUNCA borrar contenido previo.** |
 | 6 | **Guardar en Engram**: ejecutar `mem_save` aplicando `{RULES_DIR}/engram-memory-quality.md`. Usar `type: "bugfix"`, `"architecture"` o `"lesson-learned"` según corresponda. |
 | 7 | **Cerrar sesión en Engram**: ejecutar `mem_session_summary` con formato Goal/Discoveries/Accomplished/Files. **Obligatorio. No omitir.** |
-| 8 | **Imprimir checklist de cierre** (obligatorio — sin él el cierre no es válido). |
+| 8 | **Actualizar CHANGELOG**: indicar al usuario que ejecute `dysflow changelog` para registrar los cambios en `CHANGELOG.md`. |
+| 9 | **Imprimir checklist de cierre** (obligatorio — sin él el cierre no es válido). |
 
 #### Checklist de cierre
 
@@ -194,10 +217,21 @@ La IA ejecuta **todos estos pasos en orden sin detenerse:**
 - [ ] Diario actualizado (entrada AL PRINCIPIO, sin borrar contenido previo)
 - [ ] mem_save ejecutado → [title + type usado]
 - [ ] mem_session_summary ejecutado → [Goal / Discoveries / Accomplished / Files]
+- [ ] CHANGELOG actualizado → dysflow changelog (ejecutar en el proyecto)
+- [ ] Release Git: ver instrucción abajo
 ```
 
 **REGLA ANTI-OMISIÓN**: Si algún paso no aplica, marcarlo como "N/A" con justificación.
 Nunca omitirlo silenciosamente.
+
+#### Release Git tras cierre
+
+Tras imprimir el checklist, preguntar al usuario:
+
+> ¿Es esta la última spec de la release actual? Si es así, ejecuta `dysflow release`
+> para hacer merge de develop → main, crear el tag `YYYY-NNN` y subir a GitHub.
+>
+> Si quedan más specs pendientes, continúa en `develop` con la siguiente.
 
 ---
 
@@ -233,6 +267,47 @@ Aparece en dos sitios: dentro de la Spec (sección permanente) y en la respuesta
 
 ---
 
+---
+
+## Flujo Hotfix — Bug urgente en producción
+
+**Trigger:** el usuario reporta un bug en producción que hay que corregir ya, sin esperar a la próxima release.
+
+1. **Antes de generar la Spec**, indicar al usuario que ejecute:
+   ```
+   dysflow hotfix <nombre-descriptivo>
+   ```
+   Esto crea la rama `hotfix-<nombre>` desde `main` y la sube a GitHub.
+
+2. Generar la Spec normalmente (Fase 1) con prefijo `hotfix` en el título.
+
+3. Implementar y validar (Fases 2-3) igual que en el flujo estándar.
+
+4. En el Cierre (Fase 4), ejecutar el checklist normal **con estas diferencias**:
+
+   **⚠️ NO usar `dysflow release`** — ese comando fusiona `develop → main`, pero el hotfix está en `hotfix-<nombre>`, no en develop.
+
+   En su lugar, indicar al usuario que ejecute estos pasos manualmente:
+   ```bash
+   # 1. Fusionar hotfix en main y taggear
+   git checkout main
+   git pull
+   git merge hotfix-<nombre>
+   dysflow next-release     # ver qué tag se usará (ej: 2026-002)
+   git tag 2026-NNN         # usar el número que devolvió next-release
+   git push origin main
+   git push origin 2026-NNN
+
+   # 2. Fusionar hotfix de vuelta en develop (mantener sincronizado)
+   git checkout develop
+   git pull
+   git merge main
+   git push origin develop
+   ```
+   El hotfix llega a `main` sin pasar por develop, y luego se fusiona en develop para no perder el fix.
+
+---
+
 ## Principios de conducta
 
 1. **Engram primero**: antes de leer cualquier fichero, buscar en Engram.
@@ -250,3 +325,9 @@ Aparece en dos sitios: dentro de la Spec (sección permanente) y en la respuesta
     sesión empieza ciega.
 12. **Guardar con criterio**: aplicar `{RULES_DIR}/engram-memory-quality.md` antes de
     cualquier `mem_save`. Un save de calidad vale más que diez de ruido.
+13. **RFC para cambios de arquitectura**: si la historia implica cambios estructurales profundos
+    (modelo de datos, módulos transversales, patrones de diseño), crear primero un RFC usando
+    `docs/templates/rfc_template.md` antes de generar las Specs. Un RFC aprobado define el
+    marco; las Specs implementan los detalles.
+14. **Epics como Planes**: si una historia afecta a >3 módulos o tiene >5 intervenciones,
+    ofrecer siempre el Plan de Actuación (opción B) antes de crear Specs individuales.

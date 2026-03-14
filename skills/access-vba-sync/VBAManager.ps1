@@ -643,8 +643,8 @@ function Resolve-ImportFileForModule {
     $modulesPathText = [string]$ModulesPath
     $moduleNameText = [string]$ModuleName
 
-    $subFolders = @("classes", "forms", "modules", "")
-    $extensions = @(".cls", ".form.txt", ".frm", ".bas")
+    $subFolders = @("forms", "classes", "modules", "")
+    $extensions = @(".form.txt", ".frm", ".cls", ".bas")
 
     foreach ($folder in $subFolders) {
         $searchPath = if ($folder) { Join-Path -Path $modulesPathText -ChildPath $folder } else { $modulesPathText }
@@ -656,9 +656,9 @@ function Resolve-ImportFileForModule {
         }
     }
 
-    $any = Get-ChildItem -Path $modulesPathText -File -Recurse -Include "*.bas", "*.cls", "*.frm" -ErrorAction SilentlyContinue |
-        Where-Object { $_.BaseName -ieq $moduleNameText } |
-        Sort-Object -Property Extension |
+    $any = Get-ChildItem -Path $modulesPathText -File -Recurse -Include "*.bas", "*.cls", "*.frm", "*.form.txt" -ErrorAction SilentlyContinue |
+        Where-Object { $_.BaseName -ieq $moduleNameText -or ($_.Name -replace '\.form\.txt$', '') -ieq $moduleNameText } |
+        Sort-Object -Property @{ Expression = { if ($_.Name -match '\.form\.txt$') { 0 } elseif ($_.Extension -eq '.frm') { 1 } elseif ($_.Extension -eq '.cls') { 2 } else { 3 } } } |
         Select-Object -First 1
 
     if ($any) { return $any.FullName }
@@ -747,7 +747,7 @@ function Fix-EncodingInSrc {
             if ($f) { $targets += $f }
         }
     } else {
-        $targets = @(Get-ChildItem -Path $ModulesPath -File -Include "*.bas", "*.cls", "*.frm" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)
+        $targets = @(Get-ChildItem -Path $ModulesPath -Recurse -File -Include "*.bas", "*.cls", "*.frm", "*.form.txt" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)
     }
 
     $fixed = 0
@@ -875,6 +875,36 @@ function Export-DataStructure {
                 [void]$sb.AppendLine("")
             }
         } catch {}
+
+        # Detectar backends vinculados no alcanzados
+        $linkedSources = @{}
+        for ($i = 0; $i -lt $tableDefs.Count; $i++) {
+            $td = $tableDefs[$i]
+            try {
+                $connect = $td.Connect
+                if (-not [string]::IsNullOrEmpty($connect) -and $connect -match ";DATABASE=(.+)$") {
+                    $linkedDbPath = $Matches[1].Trim()
+                    if (-not $linkedSources.ContainsKey($linkedDbPath)) {
+                        $linkedSources[$linkedDbPath] = [System.Collections.Generic.List[string]]::new()
+                    }
+                    $linkedSources[$linkedDbPath].Add($td.Name)
+                }
+            } catch {}
+        }
+
+        $unreachableBackends = @($linkedSources.Keys | Where-Object { -not (Test-Path -Path $_) })
+        if ($unreachableBackends.Count -gt 0) {
+            [void]$sb.AppendLine("## Backends vinculados no alcanzados")
+            [void]$sb.AppendLine("")
+            [void]$sb.AppendLine("Las siguientes bases de datos vinculadas no estaban disponibles al generar este ERD.")
+            [void]$sb.AppendLine("Sus tablas aparecen en el listado de tablas pero su estructura no pudo verificarse.")
+            [void]$sb.AppendLine("")
+            foreach ($linkedPath in $unreachableBackends) {
+                $linkedTables = $linkedSources[$linkedPath] -join ", "
+                [void]$sb.AppendLine("- ``$linkedPath`` — tablas vinculadas: $linkedTables")
+            }
+            [void]$sb.AppendLine("")
+        }
 
         $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
         [System.IO.File]::WriteAllText($OutputPath, $sb.ToString(), $utf8NoBom)

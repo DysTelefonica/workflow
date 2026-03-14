@@ -10,6 +10,11 @@ program
   .action(require("./commands/spec-create"))
 
 program
+  .command("plan <number>")
+  .description("Crea rama plan-{NNN}-{slug} en GitHub desde develop para un Plan de Actuacion")
+  .action(require("./commands/plan-create"))
+
+program
   .command("release")
   .action(require("./commands/release"))
 

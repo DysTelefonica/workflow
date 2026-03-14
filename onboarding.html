@@ -1,0 +1,1297 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dysflow — Onboarding Interactivo</title>
+    <style>
+        :root {
+            --tele-blue: #0066FF;
+            --tele-white: #F2F4FF;
+            --pure-white: #FFFFFF;
+            --alert-red: #E66C64;
+            --success-green: #5CB85C;
+            --warning-orange: #F4C495;
+            --grey-9: #031A34;
+            --grey-6: #58617A;
+            --grey-2: #D1D5E4;
+            --grey-1: #F6F6F6;
+            --border-radius-lg: 24px;
+            --border-radius-sm: 8px;
+            --shadow: 0 4px 12px rgba(0, 102, 255, 0.1);
+        }
+
+        body {
+            font-family: 'Telefónica Sans', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            background-color: var(--tele-white);
+            color: var(--grey-6);
+            margin: 0;
+            padding: 0;
+            line-height: 1.6;
+        }
+
+        h1, h2, h3, h4 {
+            color: var(--grey-9);
+            font-weight: 300;
+            margin-top: 0;
+        }
+
+        strong {
+            font-weight: 600;
+            color: var(--tele-blue);
+        }
+
+        header {
+            background-color: var(--tele-blue);
+            color: var(--pure-white);
+            padding: 40px 20px;
+            text-align: center;
+            border-bottom-left-radius: 50% 20px;
+            border-bottom-right-radius: 50% 20px;
+        }
+
+        header h1 {
+            color: var(--pure-white);
+            font-weight: 100;
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+        }
+
+        header p {
+            font-size: 1.2rem;
+            opacity: 0.9;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 40px auto;
+            padding: 0 20px;
+        }
+
+        .card {
+            background-color: var(--pure-white);
+            border-radius: var(--border-radius-lg);
+            padding: 30px;
+            margin-bottom: 30px;
+            box-shadow: var(--shadow);
+            border: 1px solid var(--grey-2);
+        }
+
+        .card.info {
+            border-left: 6px solid var(--tele-blue);
+        }
+
+        .card.success {
+            border-left: 6px solid var(--success-green);
+        }
+
+        .card.warning {
+            border-left: 6px solid var(--warning-orange);
+            background-color: #FFFDF9;
+        }
+
+        .card.code {
+            background-color: #1E1E1E;
+            color: #D4D4D4;
+            border-left: 6px solid #6A9955;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 0.9rem;
+            overflow-x: auto;
+        }
+
+        .card code {
+            background-color: rgba(0, 102, 255, 0.1);
+            padding: 2px 6px;
+            border-radius: 4px;
+            color: var(--tele-blue);
+            font-family: 'Consolas', 'Monaco', monospace;
+        }
+
+        .card pre {
+            margin: 15px 0;
+            padding: 15px;
+            background-color: #2D2D2D;
+            border-radius: var(--border-radius-sm);
+            overflow-x: auto;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            border-bottom: 2px solid var(--grey-2);
+            padding-bottom: 10px;
+            flex-wrap: wrap;
+        }
+
+        .tab-btn {
+            background: none;
+            border: none;
+            padding: 10px 20px;
+            font-size: 1rem;
+            color: var(--grey-6);
+            cursor: pointer;
+            border-radius: 20px;
+            transition: all 0.3s ease;
+            font-family: inherit;
+        }
+
+        .tab-btn:hover {
+            color: var(--tele-blue);
+            background-color: rgba(0, 102, 255, 0.05);
+        }
+
+        .tab-btn.active {
+            background-color: var(--tele-blue);
+            color: var(--pure-white);
+            font-weight: 500;
+        }
+
+        .tab-content {
+            display: none;
+            animation: fadeIn 0.5s;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .step {
+            display: flex;
+            align-items: flex-start;
+            margin-bottom: 20px;
+            padding: 15px;
+            background-color: var(--grey-1);
+            border-radius: var(--border-radius-sm);
+        }
+
+        .step-number {
+            background-color: var(--tele-blue);
+            color: var(--pure-white);
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            margin-right: 15px;
+            flex-shrink: 0;
+        }
+
+        .step-content {
+            flex: 1;
+        }
+
+        .step-content h4 {
+            margin-bottom: 8px;
+            color: var(--grey-9);
+        }
+
+        .step-content p {
+            margin: 0;
+            font-size: 0.95rem;
+        }
+
+        .checklist {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .checklist li {
+            padding: 8px 0;
+            display: flex;
+            align-items: center;
+        }
+
+        .checklist li::before {
+            content: "✓";
+            color: var(--success-green);
+            font-weight: bold;
+            margin-right: 10px;
+        }
+
+        .workflow-diagram {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
+            margin: 30px 0;
+            padding: 20px;
+            background-color: var(--grey-1);
+            border-radius: var(--border-radius-lg);
+        }
+
+        .workflow-step {
+            background-color: var(--tele-blue);
+            color: var(--pure-white);
+            padding: 12px 20px;
+            border-radius: 20px;
+            font-weight: 500;
+            text-align: center;
+            min-width: 120px;
+        }
+
+        .workflow-stop {
+            background-color: var(--warning-orange);
+            color: var(--grey-9);
+            padding: 8px 16px;
+            border-radius: 12px;
+            font-weight: 600;
+            font-size: 0.85rem;
+        }
+
+        .workflow-arrow {
+            color: var(--tele-blue);
+            font-size: 1.5rem;
+            font-weight: bold;
+        }
+
+        .command-box {
+            background-color: #1E1E1E;
+            color: #D4D4D4;
+            padding: 15px 20px;
+            border-radius: var(--border-radius-sm);
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 0.9rem;
+            margin: 10px 0;
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .command-box .prompt {
+            color: var(--success-green);
+        }
+
+        .command-box .command {
+            color: #9CDCFE;
+        }
+
+        .requirement-badge {
+            display: inline-block;
+            background-color: var(--tele-blue);
+            color: var(--pure-white);
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.85rem;
+            margin-right: 8px;
+            margin-bottom: 8px;
+        }
+
+        .scenario-box {
+            border: 2px solid var(--grey-2);
+            border-radius: var(--border-radius-lg);
+            padding: 20px;
+            margin: 15px 0;
+            background-color: var(--pure-white);
+        }
+
+        .scenario-box h4 {
+            margin-top: 0;
+            color: var(--tele-blue);
+        }
+
+        .dialogue {
+            margin: 15px 0;
+        }
+
+        .dialogue-line {
+            padding: 10px 15px;
+            border-radius: var(--border-radius-sm);
+            margin-bottom: 8px;
+        }
+
+        .dialogue-user {
+            background-color: #E3F2FD;
+            border-left: 4px solid var(--tele-blue);
+        }
+
+        .dialogue-ia {
+            background-color: #F0F9FF;
+            border-left: 4px solid var(--success-green);
+        }
+
+        .dialogue-label {
+            font-weight: 600;
+            font-size: 0.85rem;
+            color: var(--grey-6);
+            margin-bottom: 4px;
+        }
+
+        .git-branches {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            margin: 20px 0;
+        }
+
+        .branch-box {
+            flex: 1;
+            min-width: 150px;
+            padding: 15px;
+            border-radius: var(--border-radius-sm);
+            text-align: center;
+        }
+
+        .branch-main {
+            background-color: #E8F5E9;
+            border: 2px solid #4CAF50;
+        }
+
+        .branch-develop {
+            background-color: #E3F2FD;
+            border: 2px solid var(--tele-blue);
+        }
+
+        .branch-spec {
+            background-color: #FFF3E0;
+            border: 2px solid #FF9800;
+        }
+
+        .branch-hotfix {
+            background-color: #FFEBEE;
+            border: 2px solid var(--alert-red);
+        }
+
+        .branch-name {
+            font-weight: 600;
+            font-size: 0.9rem;
+        }
+
+        .branch-use {
+            font-size: 0.8rem;
+            color: var(--grey-6);
+            margin-top: 5px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+        }
+
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid var(--grey-2);
+        }
+
+        th {
+            background-color: var(--grey-1);
+            color: var(--grey-9);
+            font-weight: 600;
+        }
+
+        tr:hover {
+            background-color: var(--grey-1);
+        }
+
+        .skill-icon {
+            font-size: 1.5rem;
+            margin-right: 8px;
+        }
+
+        .nav-guide {
+            position: fixed;
+            right: 20px;
+            top: 50%;
+            transform: translateY(-50%);
+            background-color: var(--pure-white);
+            padding: 15px;
+            border-radius: var(--border-radius-sm);
+            box-shadow: var(--shadow);
+            z-index: 100;
+        }
+
+        .nav-guide a {
+            display: block;
+            padding: 8px 0;
+            color: var(--grey-6);
+            text-decoration: none;
+            font-size: 0.9rem;
+            transition: color 0.3s;
+        }
+
+        .nav-guide a:hover {
+            color: var(--tele-blue);
+        }
+
+        .nav-guide a.active {
+            color: var(--tele-blue);
+            font-weight: 600;
+        }
+
+        footer {
+            text-align: center;
+            padding: 20px;
+            color: var(--grey-6);
+            font-size: 0.9rem;
+            margin-top: 40px;
+        }
+
+        @media (max-width: 768px) {
+            .nav-guide {
+                display: none;
+            }
+            .workflow-diagram {
+                flex-direction: column;
+            }
+            .workflow-arrow {
+                transform: rotate(90deg);
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <header>
+        <h1>Dysflow</h1>
+        <p>Framework de Desarrollo Asistido por IA para Microsoft Access</p>
+        <p style="font-size: 0.9rem; margin-top: 20px;">🎯 Onboarding Interactivo — Aprende a usar el framework</p>
+    </header>
+
+    <div class="container">
+
+        <!-- BIENVENIDA -->
+        <section class="card info" id="bienvenida">
+            <h2>Bienvenido a Dysflow</h2>
+            <p>Este onboarding te guiará paso a paso para entender <strong>qué es Dysflow</strong>, <strong>cómo instalarlo</strong> y <strong>cómo trabajar con él</strong> en tu proyecto Access/VBA.</p>
+            <p>Usa los <strong>tabs de navegación</strong> arriba para moverte entre secciones o desplázate hacia abajo.</p>
+            <div class="checklist">
+                <li>Al final sabrás inicializar un proyecto desde cero</li>
+                <li>Entenderás el flujo SDD (Spec-Driven Development)</li>
+                <li>Conocerás todos los comandos CLI disponibles</li>
+                <li>Sabrás cuándo usar cada tipo de cambio (Spec, Hotfix, RFC)</li>
+            </div>
+        </section>
+
+        <!-- QUÉ ES DYSFLOW -->
+        <section class="card" id="que-es">
+            <h2>1. ¿Qué es Dysflow?</h2>
+            <p>Dysflow es un <strong>framework de desarrollo basado en especificaciones</strong> (SDD — Spec-Driven Development) diseñado para proyectos <strong>Microsoft Access con VBA</strong>.</p>
+            
+            <h3>🎯 Objetivos principales</h3>
+            <div class="checklist">
+                <li><strong>Trazabilidad total:</strong> Cada cambio parte de una especificación documentada</li>
+                <li><strong>Cero regresiones:</strong> Análisis de impacto antes de modificar código</li>
+                <li><strong>Entrega manual:</strong> El código se copia manualmente al editor VBA</li>
+                <li><strong>Calidad arquitectónica:</strong> Separación MVVM, transacciones explícitas</li>
+            </div>
+
+            <h3>🏗️ Arquitectura del sistema</h3>
+            <p>El sistema funciona con un <strong>agente de IA</strong> (Trae, OpenCode, Cursor) que:</p>
+            <ul>
+                <li>Lee y escribe código VBA</li>
+                <li>Gestiona especificaciones y PRDs</li>
+                <li>Mantiene la memoria entre sesiones (Engram)</li>
+                <li>Orquesta el flujo de desarrollo completo</li>
+            </ul>
+        </section>
+
+        <!-- INSTALACIÓN -->
+        <section class="card" id="instalacion">
+            <h2>2. Instalación</h2>
+
+            <div class="tabs">
+                <button class="tab-btn active" onclick="openTab('req')">Requisitos</button>
+                <button class="tab-btn" onclick="openTab('inst')">Instalación</button>
+                <button class="tab-btn" onclick="openTab('verif')">Verificar</button>
+            </div>
+
+            <!-- REQUISITOS -->
+            <div id="req" class="tab-content active">
+                <h3>📋 Requisitos previos</h3>
+                <p>Antes de instalar Dysflow, asegúrate de tener:</p>
+                
+                <div style="margin: 20px 0;">
+                    <span class="requirement-badge">Windows 10/11</span>
+                    <span class="requirement-badge">Node.js 18+</span>
+                    <span class="requirement-badge">Git 2.30+</span>
+                    <span class="requirement-badge">Access 2016+</span>
+                    <span class="requirement-badge">PowerShell 7+</span>
+                </div>
+
+                <div class="card warning">
+                    <h4>⚠️ Importante</h4>
+                    <p>Dysflow <strong>solo funciona en Windows</strong> porque necesita Microsoft Access y PowerShell.</p>
+                </div>
+
+                <h4>Verificar versiones</h4>
+                <div class="command-box">
+                    <span class="prompt">PS&gt;</span>
+                    <span class="command">node --version</span>
+                </div>
+                <div class="command-box">
+                    <span class="prompt">PS&gt;</span>
+                    <span class="command">git --version</span>
+                </div>
+                <div class="command-box">
+                    <span class="prompt">PS&gt;</span>
+                    <span class="command">pwsh --version</span>
+                </div>
+            </div>
+
+            <!-- INSTALACIÓN -->
+            <div id="inst" class="tab-content">
+                <h3>🚀 Instalación con npx</h3>
+                <p>Dysflow se ejecuta directamente desde GitHub usando <code>npx</code>. No necesitas clonar ni instalar nada localmente.</p>
+
+                <div class="step">
+                    <div class="step-number">1</div>
+                    <div class="step-content">
+                        <h4>Verificar que tienes Node.js</h4>
+                        <div class="command-box">
+                            <span class="prompt">PS&gt;</span>
+                            <span class="command">node --version</span>
+                        </div>
+                        <p>Debe mostrar versión 18 o superior.</p>
+                    </div>
+                </div>
+
+                <div class="step">
+                    <div class="step-number">2</div>
+                    <div class="step-content">
+                        <h4>¡Listo! No hay más pasos</h4>
+                        <p>Dysflow se ejecuta directamente con <code>npx</code>.</p>
+                    </div>
+                </div>
+
+                <div class="card info">
+                    <h4>💡 ¿Por qué npx?</h4>
+                    <p><code>npx</code> descarga y ejecuta el paquete sobre la marcha. Siempre tendrás la última versión sin necesidad de actualizar.</p>
+                </div>
+            </div>
+
+            <!-- VERIFICAR -->
+            <div id="verif" class="tab-content">
+                <h3>✅ Verificar instalación</h3>
+                <p>Ejecuta este comando para verificar que Dysflow funciona:</p>
+                
+                <div class="command-box">
+                    <span class="prompt">PS&gt;</span>
+                    <span class="command">npx github:DysTelefonica/workflow --help</span>
+                </div>
+
+                <p>Deberías ver:</p>
+                <pre>Usage: dysflow [options] [command]
+
+Commands:
+  spec &lt;number&gt;      Create spec branch
+  plan &lt;number&gt;      Create plan branch
+  release             Create release from develop
+  hotfix &lt;name&gt;      Create hotfix branch
+  changelog &lt;from&gt;   Generate changelog
+  next-release       Get next release tag
+  init &lt;type&gt;        Initialize project (access)
+  update             Update skills and rules</pre>
+
+                <div class="card success">
+                    <p>✅ ¡Instalación completada! Continúa con la siguiente sección.</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- INICIALIZAR PROYECTO -->
+        <section class="card" id="inicializar">
+            <h2>3. Inicializar un Proyecto</h2>
+            <p>Para empezar a trabajar con Dysflow en tu proyecto Access, necesitas inicializar la estructura de carpetas y configuración.</p>
+
+            <div class="step">
+                <div class="step-number">1</div>
+                <div class="step-content">
+                    <h4>Crear estructura base</h4>
+                    <div class="command-box">
+                        <span class="prompt">PS&gt;</span>
+                        <span class="command">npx github:DysTelefonica/workflow init access</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="step">
+                <div class="step-number">2</div>
+                <div class="step-content">
+                    <h4>Editar project_context.md</h4>
+                    <p>Abre el archivo <code>project_context.md</code> en la raíz y configura:</p>
+                    <ul>
+                        <li>Nombre del proyecto</li>
+                        <li>Rutas de los archivos Access</li>
+                        <li>Stack tecnológico</li>
+                    </ul>
+                </div>
+            </div>
+
+            <h3>📁 Estructura creada</h3>
+            <pre>MiProyecto/
+├── .agent/
+│   ├── AGENTS.md
+│   ├── rules/
+│   └── skills/
+├── docs/
+│   ├── PRD/
+│   ├── specs/
+│   │   ├── active/
+│   │   └── completed/
+│   ├── ERD/
+│   ├── DISCOVERY_MAP.md
+│   ├── DEUDA_TECNICA.md
+│   └── Diario_Sesiones.md
+├── src/
+│   ├── clases/
+│   ├── modulos/
+│   └── formularios/
+├── references/
+├── .engram/
+├── CHANGELOG.md
+└── project_context.md</pre>
+        </section>
+
+        <!-- FLUJO SDD -->
+        <section class="card" id="flujo-sdd">
+            <h2>4. El Flujo SDD — Spec-Driven Development</h2>
+            <p>El corazón de Dysflow. Todo desarrollo sigue este flujo con <strong>4 fases y 2 STOPs</strong>.</p>
+
+            <div class="workflow-diagram">
+                <div class="workflow-step">Historia de Usuario</div>
+                <div class="workflow-arrow">↓</div>
+                <div class="workflow-step">Fase 1: Análisis → Spec</div>
+                <div class="workflow-arrow">↓</div>
+                <div class="workflow-stop">STOP 1: Aprobación</div>
+                <div class="workflow-arrow">↓</div>
+                <div class="workflow-step">Fase 2: Implementación</div>
+                <div class="workflow-arrow">↓</div>
+                <div class="workflow-stop">STOP 2: Validar en Access</div>
+                <div class="workflow-arrow">↓</div>
+                <div class="workflow-step">Fase 4: Cierre</div>
+            </div>
+
+            <div class="tabs">
+                <button class="tab-btn active" onclick="openTab('fase1')">Fase 1</button>
+                <button class="tab-btn" onclick="openTab('fase2')">Fase 2</button>
+                <button class="tab-btn" onclick="openTab('stop1')">STOP 1</button>
+                <button class="tab-btn" onclick="openTab('stop2')">STOP 2</button>
+                <button class="tab-btn" onclick="openTab('fase4')">Cierre</button>
+            </div>
+
+            <div id="fase1" class="tab-content active">
+                <h3>Fase 1 — Análisis y Spec</h3>
+                <p>Cuando el usuario describe lo que quiere (historia de usuario, bug, mejora):</p>
+                <div class="checklist">
+                    <li>Buscar en Engram (memoria persistente) contexto previo</li>
+                    <li>Leer DISCOVERY_MAP para localizar módulos afectados</li>
+                    <li>Leer PRD del módulo</li>
+                    <li>Analizar código fuente si es necesario</li>
+                    <li>Detectar si es una Epic (>3 módulos afectados)</li>
+                    <li>Generar la Spec en <code>docs/specs/active/</code></li>
+                </div>
+            </div>
+
+            <div id="fase2" class="tab-content">
+                <h3>Fase 2 — Implementación</h3>
+                <p>Una vez aprobada la Spec:</p>
+                <div class="checklist">
+                    <li>Leer la Spec aprobada</li>
+                    <li>Implementar cada intervención</li>
+                    <li>Aplicar convenciones de código</li>
+                    <li>Auto-verificar contra criterios de la Spec</li>
+                    <li>Generar Informe de Cambios UI si hay cambios en formularios</li>
+                </div>
+            </div>
+
+            <div id="stop1" class="tab-content">
+                <h3>STOP 1 — Aprobación de Spec</h3>
+                <div class="card warning">
+                    <h4>⏸️ La IA se detiene aquí</h4>
+                    <p>El usuario revisa:</p>
+                    <ul>
+                        <li>¿El análisis de impacto es correcto?</li>
+                        <li>¿Las intervenciones cubren todo lo necesario?</li>
+                        <li>¿Los criterios de verificación son adecuados?</li>
+                    </ul>
+                    <p><strong>Si pide cambios</strong> → modificar Spec y volver a presentar.</p>
+                    <p><strong>Si aprueba</strong> → pasar a Fase 2.</p>
+                </div>
+            </div>
+
+            <div id="stop2" class="tab-content">
+                <h3>STOP 2 — Validación en Access</h3>
+                <div class="card warning">
+                    <h4>⏸️ La IA se detiene aquí</h4>
+                    <p>El usuario:</p>
+                    <ol>
+                        <li>Copia los módulos a su proyecto VBA/Access</li>
+                        <li>Compila y prueba</li>
+                        <li>Responde con:</li>
+                    </ol>
+                    <ul>
+                        <li><code>VALIDADO EN ACCESS: Spec-XXX</code> → ir a Cierre</li>
+                        <li>Descripción de un gap → ir a Fase 3 (Iteración)</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div id="fase4" class="tab-content">
+                <h3>Fase 4 — Cierre</h3>
+                <p>Cuando el usuario confirma <code>VALIDADO EN ACCESS: Spec-XXX</code>:</p>
+                <div class="checklist">
+                    <li>Archivar Spec en <code>completed/</code></li>
+                    <li>Actualizar estado a ✅ VALIDADO EN ACCESS</li>
+                    <li>Crear o actualizar PRD</li>
+                    <li>Actualizar DEUDA_TECNICA.md</li>
+                    <li>Revisar DISCOVERY_MAP</li>
+                    <li>Registrar en Diario de Sesiones</li>
+                    <li>Guardar en Engram</li>
+                    <li>Actualizar CHANGELOG</li>
+                </div>
+            </div>
+        </section>
+
+        <!-- CASOS DE USO -->
+        <section class="card" id="casos-uso">
+            <h2>5. Casos de Uso</h2>
+            <p>Ejemplos prácticos de cómo usar Dysflow en situaciones reales.</p>
+
+            <div class="tabs">
+                <button class="tab-btn active" onclick="openTab('caso-mejora')">Nueva Funcionalidad</button>
+                <button class="tab-btn" onclick="openTab('caso-bug')">Bug Urgente</button>
+                <button class="tab-btn" onclick="openTab('caso-arq')">Cambio Arquitectura</button>
+            </div>
+
+            <!-- CASO: NUEVA FUNCIONALIDAD -->
+            <div id="caso-mejora" class="tab-content active">
+                <div class="scenario-box">
+                    <h4>📝 Nueva Funcionalidad</h4>
+                    <p><strong>El usuario dice:</strong></p>
+                    <div class="dialogue">
+                        <div class="dialogue-line dialogue-user">
+                            <div class="dialogue-label">Usuario</div>
+                            "Yo como miembro de calidad quiero que cuando registre una inspección, el sistema me avise automáticamente si el expediente ya tiene una inspección cerrada en el último mes, para evitar duplicidades."
+                        </div>
+                    </div>
+
+                    <p><strong>Qué sucede:</strong></p>
+                    <div class="step">
+                        <div class="step-number">1</div>
+                        <div class="step-content">
+                            <h4>Fase 1: Análisis</h4>
+                            <p>La IA busca en memoria, lee DISCOVERY_MAP, PRD del módulo de inspecciones, analiza código.</p>
+                        </div>
+                    </div>
+                    <div class="step">
+                        <div class="step-number">2</div>
+                        <div class="step-content">
+                            <h4>Genera Spec</h4>
+                            <p>Crea <code>docs/specs/active/spec-042-evitar-duplicidades/Spec-042_EvitarDuplicidades.md</code></p>
+                        </div>
+                    </div>
+                    <div class="step">
+                        <div class="step-number">3</div>
+                        <div class="step-content">
+                            <h4>STOP 1</h4>
+                            <p>Presenta la Spec al usuario para aprobación.</p>
+                        </div>
+                    </div>
+                    <div class="step">
+                        <div class="step-number">4</div>
+                        <div class="step-content">
+                            <h4>Implementa</h4>
+                            <p>Implementa cada intervención, auto-verifica.</p>
+                        </div>
+                    </div>
+                    <div class="step">
+                        <div class="step-number">5</div>
+                        <div class="step-content">
+                            <h4>STOP 2</h4>
+                            <p>Presenta módulos modificados. El usuario copia a Access y prueba.</p>
+                        </div>
+                    </div>
+                    <div class="step">
+                        <div class="step-number">6</div>
+                        <div class="step-content">
+                            <h4>Cierre</h4>
+                            <p>Usuario dice: <code>VALIDADO EN ACCESS: Spec-042</code></p>
+                            <p>La IA archiva, actualiza PRD, guarda en Engram, actualiza CHANGELOG.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- CASO: BUG URGENTE -->
+            <div id="caso-bug" class="tab-content">
+                <div class="scenario-box">
+                    <h4>🐛 Bug Urgente en Producción</h4>
+                    <p><strong>El usuario dice:</strong></p>
+                    <div class="dialogue">
+                        <div class="dialogue-line dialogue-user">
+                            <div class="dialogue-label">Usuario</div>
+                            "Hay un bug crítico: cuando se elimina un expediente, los registros de inspecciones asociados quedan huérfanos. Hay que corregirlo ya."
+                        </div>
+                    </div>
+
+                    <p><strong>Qué sucede:</strong></p>
+                    <div class="step">
+                        <div class="step-number">1</div>
+                        <div class="step-content">
+                            <h4>Crear rama hotfix</h4>
+                            <div class="command-box">
+                                <span class="prompt">PS&gt;</span>
+                                <span class="command">npx github:DysTelefonica/workflow hotfix fix-huerfanos-inspeccion</span>
+                            </div>
+                            <p>Crea rama <code>hotfix-fix-huerfanos-inspeccion</code> desde <code>main</code>.</p>
+                        </div>
+                    </div>
+                    <div class="step">
+                        <div class="step-number">2</div>
+                        <div class="step-content">
+                            <h4>Spec con prefijo "hotfix"</h4>
+                            <p>La IA genera una Spec con título "Hotfix: Corregir registros huérfanos".</p>
+                        </div>
+                    </div>
+                    <div class="step">
+                        <div class="step-number">3</div>
+                        <div class="step-content">
+                            <h4>Implementar y validar</h4>
+                            <p>Mismo flujo que funcionalidad normal.</p>
+                        </div>
+                    </div>
+                    <div class="step">
+                        <div class="step-number">4</div>
+                        <div class="step-content">
+                            <h4>Cierre manual</h4>
+                            <p>El usuario ejecuta los comandos de merge manualmente (el hotfix no pasa por develop).</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- CASO: ARQUITECTURA -->
+            <div id="caso-arq" class="tab-content">
+                <div class="scenario-box">
+                    <h4>🏗️ Cambio de Arquitectura</h4>
+                    <p><strong>El usuario dice:</strong></p>
+                    <div class="dialogue">
+                        <div class="dialogue-line dialogue-user">
+                            <div class="dialogue-label">Usuario</div>
+                            "Queremos migrar el sistema de gestión de usuarios a un patrón repositorio limpio. Actualmente está todo en los formularios."
+                        </div>
+                    </div>
+
+                    <p><strong>Qué sucede:</strong></p>
+                    <div class="step">
+                        <div class="step-number">1</div>
+                        <div class="step-content">
+                            <h4>RFC primero</h4>
+                            <p>Se crea un RFC (Request for Comments) documentando el cambio de arquitectura. El usuario lo aprueba.</p>
+                        </div>
+                    </div>
+                    <div class="step">
+                        <div class="step-number">2</div>
+                        <div class="step-content">
+                            <h4>Detectar Epic</h4>
+                            <p>La IA detecta que el cambio afecta >3 módulos. Ofrece crear un <strong>Plan de Actuación</strong>.</p>
+                        </div>
+                    </div>
+                    <div class="step">
+                        <div class="step-number">3</div>
+                        <div class="step-content">
+                            <h4>Plan de Actuación</h4>
+                            <p>Plan-043: Migración RepositorioUsuario<br/>Contiene: Spec-044, Spec-045, Spec-046</p>
+                        </div>
+                    </div>
+                    <div class="step">
+                        <div class="step-number">4</div>
+                        <div class="step-content">
+                            <h4>Spec por Spec</h4>
+                            <p>Spec-044: Extraer RepositorioUsuario<br/>Spec-045: Crear ServicioUsuario<br/>Spec-046: Refactorizar formularios</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- GIT WORKFLOW -->
+        <section class="card" id="git-workflow">
+            <h2>6. Git Workflow</h2>
+            <p>Dysflow usa un Git Flow simplificado para gestionar ramas y releases.</p>
+
+            <h3>🌿 Ramas del proyecto</h3>
+            <div class="git-branches">
+                <div class="branch-box branch-main">
+                    <div class="branch-name">main</div>
+                    <div class="branch-use">Código en producción</div>
+                </div>
+                <div class="branch-box branch-develop">
+                    <div class="branch-name">develop</div>
+                    <div class="branch-use">Integración de features</div>
+                </div>
+                <div class="branch-box branch-spec">
+                    <div class="branch-name">spec-NNN-*</div>
+                    <div class="branch-use">Implementación de specs</div>
+                </div>
+                <div class="branch-box branch-hotfix">
+                    <div class="branch-name">hotfix-*</div>
+                    <div class="branch-use">Correcciones urgentes</div>
+                </div>
+            </div>
+
+            <h3>📋 Convención de nombres</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Tipo</th>
+                        <th>Formato</th>
+                        <th>Ejemplo</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Spec</td>
+                        <td><code>spec-{NNN}-{slug}</code></td>
+                        <td><code>spec-042-evitar-duplicidades</code></td>
+                    </tr>
+                    <tr>
+                        <td>Hotfix</td>
+                        <td><code>hotfix-{nombre}</code></td>
+                        <td><code>hotfix-fix-login</code></td>
+                    </tr>
+                    <tr>
+                        <td>Release</td>
+                        <td><code>YYYY-NNN</code></td>
+                        <td><code>2026-003</code></td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h3>🔄 Flujo de desarrollo</h3>
+            <div class="workflow-diagram">
+                <div class="workflow-step">develop</div>
+                <div class="workflow-arrow">→</div>
+                <div class="workflow-step">spec-042</div>
+                <div class="workflow-arrow">→</div>
+                <div class="workflow-step">develop</div>
+                <div class="workflow-arrow">→</div>
+                <div class="workflow-step">main + tag</div>
+            </div>
+
+            <h3>📌 Comandos de ramas</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Acción</th>
+                        <th>Comando</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Crear rama para Spec</td>
+                        <td><code>dysflow spec 042</code></td>
+                    </tr>
+                    <tr>
+                        <td>Crear rama para Hotfix</td>
+                        <td><code>dysflow hotfix fix-login</code></td>
+                    </tr>
+                    <tr>
+                        <td>Crear release</td>
+                        <td><code>dysflow release</code></td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+
+        <!-- COMANDOS CLI -->
+        <section class="card" id="comandos">
+            <h2>7. Comandos CLI</h2>
+            <p>Todos los comandos disponibles en Dysflow:</p>
+
+            <div class="card info">
+                <h4>📌 Cómo ejecutar los comandos</h4>
+                <p>Usa <code>npx github:DysTelefonica/workflow</code> seguido del comando:</p>
+                <div class="command-box">
+                    <span class="prompt">PS&gt;</span>
+                    <span class="command">npx github:DysTelefonica/workflow init access</span>
+                </div>
+            </div>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>Comando</th>
+                        <th>Descripción</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>dysflow spec &lt;number&gt;</code></td>
+                        <td>Crear rama <code>spec-{NNN}-{slug}</code> desde develop</td>
+                    </tr>
+                    <tr>
+                        <td><code>dysflow plan &lt;number&gt;</code></td>
+                        <td>Crear rama <code>plan-{NNN}-{slug}</code> para Planes de Actuación</td>
+                    </tr>
+                    <tr>
+                        <td><code>dysflow release</code></td>
+                        <td>Fusionar develop → main, crear tag YYYY-NNN</td>
+                    </tr>
+                    <tr>
+                        <td><code>dysflow hotfix &lt;name&gt;</code></td>
+                        <td>Crear rama hotfix desde main</td>
+                    </tr>
+                    <tr>
+                        <td><code>dysflow changelog &lt;from&gt;</code></td>
+                        <td>Generar changelog desde tag</td>
+                    </tr>
+                    <tr>
+                        <td><code>dysflow next-release</code></td>
+                        <td>Mostrar el próximo número de release</td>
+                    </tr>
+                    <tr>
+                        <td><code>dysflow init access</code></td>
+                        <td>Inicializar proyecto Access</td>
+                    </tr>
+                    <tr>
+                        <td><code>dysflow update</code></td>
+                        <td>Actualizar skills y rules</td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+
+        <!-- SKILLS -->
+        <section class="card" id="skills">
+            <h2>8. Skills del Sistema</h2>
+            <p>Las <strong>skills</strong> son capacidades que el agente de IA puede ejecutar:</p>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>Skill</th>
+                        <th>Función</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><span class="skill-icon">🎯</span> sdd-protocol</td>
+                        <td>Orquestador del flujo SDD</td>
+                    </tr>
+                    <tr>
+                        <td><span class="skill-icon">📝</span> spec-writer</td>
+                        <td>Generación de especificaciones técnicas</td>
+                    </tr>
+                    <tr>
+                        <td><span class="skill-icon">📋</span> prd-writer</td>
+                        <td>Generación y mantenimiento de PRDs</td>
+                    </tr>
+                    <tr>
+                        <td><span class="skill-icon">🐛</span> hotfix</td>
+                        <td>Gestión de bugs urgentes</td>
+                    </tr>
+                    <tr>
+                        <td><span class="skill-icon">🏗️</span> rfc-writer</td>
+                        <td>Cambios de arquitectura</td>
+                    </tr>
+                    <tr>
+                        <td><span class="skill-icon">🔄</span> access-vba-sync</td>
+                        <td>Sincronización Access ↔ código</td>
+                    </tr>
+                    <tr>
+                        <td><span class="skill-icon">📊</span> plan-writer</td>
+                        <td>Planes de actuación para Epics</td>
+                    </tr>
+                    <tr>
+                        <td><span class="skill-icon">📔</span> diario-sesion</td>
+                        <td>Registro de sesiones de desarrollo</td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+
+        <!-- MEMORIA ENGRAM -->
+        <section class="card" id="engram">
+            <h2>9. Memoria Persistente (Engram)</h2>
+            <p>El sistema usa <strong>Engram</strong> para recordar decisiones entre sesiones:</p>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>Función</th>
+                        <th>Cuándo usarla</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>mem_search</code></td>
+                        <td>Buscar contexto previo antes de actuar</td>
+                    </tr>
+                    <tr>
+                        <td><code>mem_save</code></td>
+                        <td>Guardar decisiones importantes (arquitectura, bugs)</td>
+                    </tr>
+                    <tr>
+                        <td><code>mem_session_start</code></td>
+                        <td>Iniciar sesión (al principio de cada sesión)</td>
+                    </tr>
+                    <tr>
+                        <td><code>mem_session_summary</code></td>
+                        <td>Cerrar sesión con resumen (al final, obligatorio)</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div class="card info">
+                <h4>💡 Regla de oro</h4>
+                <p><strong>Engram primero:</strong> Antes de leer cualquier archivo, buscar en Engram. El conocimiento ya aprendido no se re-aprende.</p>
+            </div>
+        </section>
+
+        <!-- CONVENCIONES -->
+        <section class="card" id="convenciones">
+            <h2>10. Convenciones del Proyecto</h2>
+
+            <h3>Nomenclatura VBA</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Elemento</th>
+                        <th>Convención</th>
+                        <th>Ejemplo</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Clases/Módulos</td>
+                        <td>PascalCase</td>
+                        <td><code>ClienteService.cls</code></td>
+                    </tr>
+                    <tr>
+                        <td>Funciones públicas</td>
+                        <td>PascalCase</td>
+                        <td><code>GetClientesActivos()</code></td>
+                    </tr>
+                    <tr>
+                        <td>Variables locales</td>
+                        <td>camelCase</td>
+                        <td><code>lngIdCliente</code></td>
+                    </tr>
+                    <tr>
+                        <td>Constantes</td>
+                        <td>UPPER_SNAKE_CASE</td>
+                        <td><code>MAX_REINTENTOS</code></td>
+                    </tr>
+                    <tr>
+                        <td>Controles formulario</td>
+                        <td>Prefijo tipo</td>
+                        <td><code>btnGuardar</code>, <code>txtNombre</code></td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h3>Prefijos de controles</h3>
+            <div style="display: flex; flex-wrap: wrap; gap: 10px; margin: 15px 0;">
+                <span class="requirement-badge">btn - Button</span>
+                <span class="requirement-badge">txt - TextBox</span>
+                <span class="requirement-badge">cmb - ComboBox</span>
+                <span class="requirement-badge">lst - ListBox</span>
+                <span class="requirement-badge">lbl - Label</span>
+                <span class="requirement-badge">frm - Subformulario</span>
+            </div>
+        </section>
+
+        <!-- RESOLUCIÓN PROBLEMAS -->
+        <section class="card" id="problemas">
+            <h2>11. Resolución de Problemas</h2>
+
+            <div class="scenario-box">
+                <h4>❌ "Access is being used by another process"</h4>
+                <p><strong>Solución:</strong> Cerrar Access completamente y volver a intentar.</p>
+                <div class="command-box">
+                    <span class="prompt">PS&gt;</span>
+                    <span class="command">node skills/access-vba-sync/cli.js generate-erd --backend "C:\Ruta\MiBackend.accdb"</span>
+                </div>
+            </div>
+
+            <div class="scenario-box">
+                <h4>❌ "No se encontró la rama develop"</h4>
+                <p><strong>Solución:</strong> Crear develop desde main si no existe.</p>
+                <div class="command-box">
+                    <span class="prompt">PS&gt;</span>
+                    <span class="command">git checkout main</span>
+                </div>
+                <div class="command-box">
+                    <span class="prompt">PS&gt;</span>
+                    <span class="command">git checkout -b develop</span>
+                </div>
+                <div class="command-box">
+                    <span class="prompt">PS&gt;</span>
+                    <span class="command">git push -u origin develop</span>
+                </div>
+            </div>
+
+            <div class="scenario-box">
+                <h4>❌ La Spec no pasa el STOP 1</h4>
+                <p><strong>Solución:</strong></p>
+                <ul>
+                    <li>Revisar el análisis de impacto</li>
+                    <li>Aclarar las ambigüedades en "Gaps y Decisiones"</li>
+                    <li>Añadir más contexto en la historia de usuario</li>
+                </ul>
+            </div>
+        </section>
+
+        <!-- PRÓXIMOS PASOS -->
+        <section class="card success" id=" proximos-pasos">
+            <h2>✅ ¡Listo para empezar!</h2>
+            <p>Ahora que conoces Dysflow, estos son los siguientes pasos:</p>
+            <div class="checklist">
+                <li>Inicializar un proyecto: <code>dysflow init access</code></li>
+                <li>Leer el <code>project_context.md</code> y personalizarlo</li>
+                <li>Probar el flujo SDD con una historia de usuario pequeña</li>
+                <li>Configurar el agente IA en <code>.agent/AGENTS.md</code></li>
+            </div>
+            <p style="margin-top: 20px;"><strong>¿Tienes dudas?</strong> Revisa este onboarding de nuevo o pregunta a tu equipo.</p>
+        </section>
+
+    </div>
+
+    <footer>
+        <p>Dysflow v1.0.0 — Framework de Desarrollo Asistido por IA para Microsoft Access</p>
+        <p>Documentación interactiva — Usa los tabs para navegar</p>
+    </footer>
+
+    <script>
+        function openTab(tabId) {
+            const contents = document.querySelectorAll('.tab-content');
+            contents.forEach(content => content.classList.remove('active'));
+            
+            const buttons = document.querySelectorAll('.tab-btn');
+            buttons.forEach(btn => btn.classList.remove('active'));
+            
+            document.getElementById(tabId).classList.add('active');
+            event.target.classList.add('active');
+        }
+
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function (e) {
+                e.preventDefault();
+                const target = document.querySelector(this.getAttribute('href'));
+                if (target) {
+                    target.scrollIntoView({
+                        behavior: 'smooth'
+                    });
+                }
+            });
+        });
+    </script>
+
+</body>
+
+</html>

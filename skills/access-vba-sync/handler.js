@@ -431,8 +431,12 @@ class AccessVbaSyncSkill {
     }
 
     try {
-      process.kill(pid, "SIGTERM");
-      console.log(`🛑 Señal enviada al watcher (pid ${pid})`);
+      if (process.platform === "win32") {
+        require("child_process").execSync(`taskkill /PID ${pid} /F /T`, { stdio: "ignore" });
+      } else {
+        process.kill(pid, "SIGTERM");
+      }
+      console.log(`🛑 Watcher detenido (pid ${pid})`);
     } catch (err) {
       console.log(`⚠️  No se pudo detener el watcher (pid ${pid}): ${err && err.message ? err.message : String(err)}`);
     }
