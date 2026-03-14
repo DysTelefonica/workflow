@@ -104,6 +104,33 @@ module.exports = function updateAccess() {
     log("✔", "templates/ actualizado en docs/templates/")
   }
 
+  // 3.5 Bootstrap minimo de estructura (solo crea faltantes, no sobreescribe)
+  const requiredDirs = [
+    "docs/plans/active",
+    "docs/plans/completed",
+    "docs/specs/active",
+    "docs/specs/completed",
+    "docs/PRD",
+    "docs/ERD",
+    "references",
+  ]
+
+  const createdDirs = []
+  for (const relativeDir of requiredDirs) {
+    const absoluteDir = path.join(cwd, relativeDir)
+    if (!fs.existsSync(absoluteDir)) {
+      ensureDir(absoluteDir)
+      createdDirs.push(relativeDir)
+    }
+  }
+
+  if (createdDirs.length > 0) {
+    log("✔", "Estructura minima creada (solo carpetas faltantes):")
+    createdDirs.forEach(d => log("+", d))
+  } else {
+    log("·", "Estructura minima ya existente (sin cambios)")
+  }
+
   // 4. npm install en access-vba-sync (por si hay nuevas dependencias)
   const syncDir = path.join(cwd, skillsDir, "access-vba-sync")
   if (fs.existsSync(path.join(syncDir, "package.json"))) {
@@ -125,7 +152,7 @@ module.exports = function updateAccess() {
   console.log("\n  Archivos del proyecto NO modificados:")
   console.log("    · AGENTS.md")
   console.log("    · references/project_context.md")
-  console.log("    · docs/PRD/, docs/specs/, docs/ERD/")
+  console.log("    · Contenido de docs/PRD/, docs/specs/, docs/plans/, docs/ERD/")
   console.log("    · src/, data/, .engram/")
   console.log("\n  Reinicia tu IDE para cargar las skills actualizadas.\n")
 }
