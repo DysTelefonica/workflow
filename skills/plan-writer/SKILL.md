@@ -69,11 +69,23 @@ Con el contexto del sdd-protocol (ya se habrá leído DISCOVERY_MAP y PRDs):
 Escanear `docs/plans/active/` y `docs/plans/completed/` para determinar el siguiente
 número disponible. Formato: `PLAN-{NNN}` (tres dígitos, correlativo).
 
+Preflight obligatorio:
+- Si no existe `docs/plans/active/`, crearla.
+- Si no existe `docs/plans/completed/`, crearla.
+- Si no existe `docs/specs/active/`, crearla (para que los enlaces del plan sean válidos).
+
 ### Paso 3 — Generar el PLAN
 
 Usar la plantilla `{ruta_de_esta_skill}/references/plan_template.md`.
 
 Guardar en: `docs/plans/active/plan-{NNN}-{slug}/PLAN_{NNN}_{Titulo}.md`
+
+Reglas obligatorias de salida:
+1. El plan SIEMPRE se guarda en archivo Markdown en la ruta anterior (no solo en chat).
+2. Tras guardar, verificar que el archivo existe.
+3. Si el archivo no existe, la tarea NO está completada y se debe corregir antes de responder.
+4. Los enlaces a Specs deben apuntar a `../../specs/active/...` o `../../specs/completed/...`.
+5. No dejar placeholders (`{...}`, `X segundos`, `Y segundos`, etc.).
 
 ### Paso 4 — STOP: Validación del Plan
 
@@ -88,6 +100,11 @@ Presentar el Plan al usuario. El usuario revisa:
 dysflow plan {NNN}
 ```
 Esto crea la rama `plan-{NNN}-{slug}` desde `develop`.
+
+Respuesta mínima obligatoria al usuario tras crear el plan:
+- Ruta exacta del archivo creado
+- Comando `dysflow plan {NNN}`
+- Resumen ejecutivo (máximo 10 líneas)
 
 ### Paso 5 — Guardar en Engram
 

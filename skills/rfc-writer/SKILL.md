@@ -33,9 +33,20 @@ Preguntar al usuario si no está claro:
 Usar la plantilla `docs/templates/rfc_template.md`.
 Numeración: `RFC-NNN` (correlativo al último RFC en `docs/rfcs/`).
 
+Reglas obligatorias:
+1. El RFC SIEMPRE se guarda en archivo Markdown (no solo en chat).
+2. Ruta obligatoria: `docs/rfcs/RFC-{NNN}_{titulo-kebab}.md`.
+3. Tras guardar, verificar que el archivo existe.
+4. No dejar placeholders (`{...}`, `X segundos`, `Y segundos`, etc.).
+
 ### Paso 3 — STOP: presentar y esperar aprobación
 Presentar el RFC completo al usuario.
 No iniciar el SDD hasta recibir aprobación explícita (`APROBADO`).
+
+Respuesta mínima obligatoria:
+- Ruta exacta del RFC creado
+- Estado actual del RFC (`Borrador` o `En revisión`)
+- Resumen ejecutivo (máximo 10 líneas)
 
 ### Paso 4 — Guardar en Engram
 ```
@@ -43,6 +54,6 @@ mem_save title="RFC-NNN: [título]" type="architecture"
 ```
 
 ### Paso 5 — Tras aprobación
-- Guardar el RFC en `docs/rfcs/RFC-NNN_[titulo-kebab].md`
+- Actualizar estado del RFC a `Aprobado`
 - Actualizar `AGENTS.md` si el RFC introduce nuevas reglas críticas
 - Iniciar sdd-protocol con referencia al RFC aprobado
