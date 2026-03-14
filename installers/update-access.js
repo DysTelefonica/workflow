@@ -110,6 +110,7 @@ module.exports = function updateAccess() {
     "docs/plans/completed",
     "docs/specs/active",
     "docs/specs/completed",
+    "docs/rfcs",
     "docs/PRD",
     "docs/ERD",
     "references",
