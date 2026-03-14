@@ -763,6 +763,135 @@ function Fix-EncodingInSrc {
     return $fixed
 }
 
+function Export-DataStructure {
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory = $true)][string]$DatabasePath,
+        [Parameter(Mandatory = $true)][string]$OutputPath,
+        [string]$Password = ""
+    )
+
+    $dbEngine = $null
+    $database = $null
+
+    $typeMap = @{
+        1 = "Boolean"; 2 = "Byte"; 3 = "Integer"; 4 = "Long"; 5 = "Currency"
+        6 = "Single"; 7 = "Double"; 8 = "Date/Time"; 9 = "Binary"; 10 = "Text"
+        11 = "OLE"; 12 = "Memo"; 15 = "GUID"; 16 = "BigInt"
+        17 = "VarBinary"; 18 = "Char"; 19 = "Numeric"; 20 = "Decimal"
+    }
+
+    try {
+        $dbEngine = New-DaoDbEngine
+        if (-not $dbEngine) { throw "No se pudo crear DAO.DBEngine" }
+
+        $connect = if (-not [string]::IsNullOrEmpty($Password)) { ";PWD=$Password" } else { "" }
+        $database = $dbEngine.OpenDatabase($DatabasePath, $false, $true, $connect)
+
+        $sb = [System.Text.StringBuilder]::new()
+        $dbName = [System.IO.Path]::GetFileNameWithoutExtension($DatabasePath)
+        [void]$sb.AppendLine("# ERD - $dbName")
+        [void]$sb.AppendLine("")
+        [void]$sb.AppendLine("Generado: $(Get-Date -Format 'yyyy-MM-dd HH:mm')")
+        [void]$sb.AppendLine("")
+
+        # Recopilar nombres de tablas (excluir tablas del sistema)
+        $tableDefs = $database.TableDefs
+        $tables = @()
+        for ($i = 0; $i -lt $tableDefs.Count; $i++) {
+            $td = $tableDefs[$i]
+            try {
+                if ($td.Name -notmatch "^MSys" -and $td.Name -notmatch "^~") {
+                    $tables += $td.Name
+                }
+            } catch {}
+        }
+        $tables = $tables | Sort-Object
+
+        [void]$sb.AppendLine("## Tablas ($($tables.Count))")
+        [void]$sb.AppendLine("")
+
+        foreach ($tableName in $tables) {
+            try {
+                $td = $database.TableDefs[$tableName]
+                [void]$sb.AppendLine("### $tableName")
+                [void]$sb.AppendLine("")
+                [void]$sb.AppendLine("| Campo | Tipo | Tamaño | Requerido | PK |")
+                [void]$sb.AppendLine("|---|---|---|---|---|")
+
+                # Detectar campos clave primaria
+                $pkFields = @()
+                try {
+                    for ($i = 0; $i -lt $td.Indexes.Count; $i++) {
+                        $idx = $td.Indexes[$i]
+                        if ($idx.Primary) {
+                            for ($j = 0; $j -lt $idx.Fields.Count; $j++) {
+                                $pkFields += $idx.Fields[$j].Name
+                            }
+                        }
+                    }
+                } catch {}
+
+                for ($i = 0; $i -lt $td.Fields.Count; $i++) {
+                    try {
+                        $field = $td.Fields[$i]
+                        $typeCode = [int]$field.Type
+                        $typeName = if ($typeMap.ContainsKey($typeCode)) { $typeMap[$typeCode] } else { "Tipo$typeCode" }
+                        $size = if ($field.Size -gt 0) { $field.Size } else { "-" }
+                        $required = if ($field.Required) { "Si" } else { "No" }
+                        $isPk = if ($pkFields -contains $field.Name) { "PK" } else { "" }
+                        [void]$sb.AppendLine("| $($field.Name) | $typeName | $size | $required | $isPk |")
+                    } catch {}
+                }
+                [void]$sb.AppendLine("")
+            } catch {
+                [void]$sb.AppendLine("_Error leyendo tabla: $tableName - $($_.Exception.Message)_")
+                [void]$sb.AppendLine("")
+            }
+        }
+
+        # Relaciones
+        try {
+            $relations = $database.Relations
+            if ($relations.Count -gt 0) {
+                [void]$sb.AppendLine("## Relaciones")
+                [void]$sb.AppendLine("")
+                [void]$sb.AppendLine("| Nombre | Tabla origen | Campo origen | Tabla destino | Campo destino |")
+                [void]$sb.AppendLine("|---|---|---|---|---|")
+
+                for ($i = 0; $i -lt $relations.Count; $i++) {
+                    try {
+                        $rel = $relations[$i]
+                        $originField = ""
+                        $foreignField = ""
+                        if ($rel.Fields.Count -gt 0) {
+                            $rf = $rel.Fields[0]
+                            $originField = $rf.Name
+                            $foreignField = $rf.ForeignName
+                        }
+                        [void]$sb.AppendLine("| $($rel.Name) | $($rel.Table) | $originField | $($rel.ForeignTable) | $foreignField |")
+                    } catch {}
+                }
+                [void]$sb.AppendLine("")
+            }
+        } catch {}
+
+        $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+        [System.IO.File]::WriteAllText($OutputPath, $sb.ToString(), $utf8NoBom)
+
+    } finally {
+        if ($database) {
+            try { $database.Close() } catch {}
+            try { [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($database) | Out-Null } catch {}
+        }
+        if ($dbEngine) {
+            try { [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($dbEngine) | Out-Null } catch {}
+        }
+        [System.GC]::Collect()
+        [System.GC]::WaitForPendingFinalizers()
+    }
+}
+
 function Fix-EncodingInAccess {
     [CmdletBinding()]
     Param(

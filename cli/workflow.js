@@ -2,41 +2,40 @@
 
 const { Command } = require("commander")
 
-const specCreate = require("./commands/spec-create")
-const release = require("./commands/release")
-const hotfix = require("./commands/hotfix")
-const changelog = require("./commands/changelog")
-const nextRelease = require("./commands/next-release")
-
 const program = new Command()
-
-program.name("workflow")
+program.name("dysflow")
 
 program
   .command("spec <number>")
-  .action(specCreate)
+  .action(require("./commands/spec-create"))
 
 program
   .command("release")
-  .action(release)
+  .action(require("./commands/release"))
 
 program
   .command("hotfix <name>")
-  .action(hotfix)
+  .action(require("./commands/hotfix"))
 
 program
   .command("changelog <from>")
-  .action(changelog)
+  .action(require("./commands/changelog"))
 
 program
   .command("next-release")
-  .action(nextRelease)
-
-program.parse(process.argv)
-
-const initProject = require("./commands/init-project")
+  .action(require("./commands/next-release"))
 
 program
-  .command("init")
-  .description("Initialize workflow project")
-  .action(initProject)
+  .command("init <type>")
+  .description("Initialize workflow project. Types: access")
+  .option("--migrate", "Migrate existing project to new skills location")
+  .action((type, opts) => {
+    if (type === "access") {
+      require("../installers/init-access")(opts)
+    } else {
+      console.error(`Unknown project type: ${type}. Use: access`)
+      process.exit(1)
+    }
+  })
+
+program.parse(process.argv)

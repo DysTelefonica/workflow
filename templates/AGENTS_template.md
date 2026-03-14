@@ -37,7 +37,7 @@ Formulario → ViewModel → Servicio → Repositorio
 
 {{PROJECT_DOMAIN}}
 
-**Estado del proyecto**
+**Fase actual**
 
 {{PROJECT_STAGE}}
 
@@ -46,9 +46,8 @@ Formulario → ViewModel → Servicio → Repositorio
 # Estructura del repositorio
 
 
-.agent
-skills
-rules
+{{SKILLS_DIR}}
+{{RULES_DIR}}
 docs
 PRD
 specs
@@ -121,21 +120,21 @@ Solo si Engram no tiene respuesta se consulta el repositorio.
 
 Las skills disponibles para el agente se encuentran en:
 
-.agent/skills
+{{SKILLS_DIR}}
 
 Cada subcarpeta corresponde a una skill independiente.
 
 Estructura:
 
 
-.agent/skills
+{{SKILLS_DIR}}
 skill-name
 SKILL.md
 references/
 scripts/
 
 
-El agente debe asumir que **todas las carpetas dentro de `.agent/skills` son habilidades disponibles**.
+El agente debe asumir que **todas las carpetas dentro de `{{SKILLS_DIR}}` son habilidades disponibles**.
 
 Para conocer el comportamiento de una skill:
 
@@ -181,7 +180,7 @@ Genera especificaciones técnicas.
 Ubicación plantilla:
 
 
-.agent/skills/spec-writer/references/SPEC-TEMPLATE.md
+{{SKILLS_DIR}}/spec-writer/references/SPEC-TEMPLATE.md
 
 
 ---
@@ -235,6 +234,30 @@ Requisito:
 
 
 Access cerrado
+
+
+### ERDs del sistema
+
+El sistema puede tener múltiples ERDs en `docs/ERD/`.
+
+Cada ERD corresponde a un backend (`*_Datos.accdb`) del sistema.
+
+Estructura esperada:
+
+
+docs/ERD/
+  {{PROJECT_NAME}}_Datos.md       ← backend principal del proyecto
+  OtroSistema_Datos.md            ← backend vinculado (tablas enlazadas)
+
+
+El agente debe leer **todos los ERDs presentes** en `docs/ERD/` para entender
+el modelo de datos completo, ya que el frontend puede tener tablas vinculadas
+de backends de otros sistemas.
+
+Para regenerar un ERD concreto:
+
+
+node {{SKILLS_DIR}}/access-vba-sync/cli.js generate-erd --backend <ruta_Datos.accdb> --erd_path docs/ERD
 
 
 ---
@@ -372,7 +395,7 @@ Permitidos si no alteran contratos de interfaz.
 
 Antes de asumir que una habilidad no existe, el agente debe revisar:
 
-.agent/skills
+{{SKILLS_DIR}}
 # Regla final
 
 Nunca escribir código sin haber pasado por el protocolo **SDD**.

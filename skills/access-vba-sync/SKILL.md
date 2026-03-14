@@ -72,12 +72,17 @@ src/forms/Form_FormWeb.cls
 - En `unlink` (borrado): avisar (no se puede borrar módulo en VBA automáticamente de forma segura).
 
 ### R5. Generación de ERD (generate-erd)
-- Permitir extraer la estructura de tablas (Frontend o Backend) a formato Markdown.
+- Extraer la estructura de tablas de un backend a formato Markdown.
 - Parámetros:
-  - `--backend <ruta>`: Ruta al archivo Access con las tablas (puede ser el mismo Frontend o un Backend separado).
-  - `--erd_path <ruta>`: Ruta de salida del archivo Markdown (ej. `docs/structure.md`).
+  - `--backend <ruta>`: Ruta al archivo `*_Datos.accdb` del que se extrae el ERD.
+  - `--erd_path <carpeta>`: Carpeta de salida. El archivo se nombra igual que el backend (`NombreBackend.md`).
 - Ejecutar: `VBAManager.ps1 -Action Generate-ERD -BackendPath ... -ErdPath ...`
-- Autodetectar backend si no se especifica (buscar en root).
+- Autodetectar backend si no se especifica (buscar `*_Datos.accdb` en root).
+- **Un ERD por backend**: si el sistema tiene tablas vinculadas de otros backends,
+  se debe ejecutar `generate-erd` para cada `*_Datos.accdb` implicado.
+  Todos los ERDs se depositan en `docs/ERD/` con el nombre del propio archivo.
+- El agente debe leer **todos los archivos de `docs/ERD/`** para tener el modelo
+  de datos completo (backend propio + backends vinculados de otros sistemas).
 
 ### R6. Fin de sesión (end)
 - Parar watcher si está activo.

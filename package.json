@@ -1,9 +1,11 @@
 {
- "name": "workflow-cli",
- "bin": {
-  "workflow": "./cli/workflow.js"
- },
- "dependencies": {
-  "commander": "^14.0.3"
- }
+  "name": "workflow-cli",
+  "version": "1.0.0",
+  "description": "Framework de desarrollo para proyectos Microsoft Access + IA",
+  "bin": {
+    "dysflow": "./cli/workflow.js"
+  },
+  "dependencies": {
+    "commander": "^14.0.3"
+  }
 }

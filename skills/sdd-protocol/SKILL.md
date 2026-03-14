@@ -22,7 +22,7 @@ Rutas estándar (confirmar en `project_context.md`):
 | :--- | :--- |
 | DISCOVERY_MAP | `docs/DISCOVERY_MAP.md` |
 | PRDs | `docs/PRD/` |
-| Modelo de datos | `references/Estructura_Datos.md` |
+| Modelo de datos (ERDs) | `docs/ERD/` — un archivo `.md` por cada `*_Datos.accdb` (backend propio + backends vinculados). Leer **todos** los ERDs presentes para tener el modelo completo. |
 | Specs activas | `docs/specs/active/` |
 | Specs completadas | `docs/specs/completed/` |
 | Skill spec-writer | `{SKILLS_DIR}/spec-writer/SKILL.md` |
@@ -67,6 +67,8 @@ La IA ejecuta todo esto sin detenerse:
    Solo ir a los ficheros si Engram no lo cubre.
 
 2. Leer `docs/DISCOVERY_MAP.md` → localizar módulos y archivos físicos afectados.
+   Leer **todos los ERDs** en `docs/ERD/` para tener el modelo de datos completo
+   (incluye el backend propio del proyecto y los backends vinculados de otros sistemas).
 
 3. Verificar que el módulo afectado tiene PRD en `docs/PRD/`.
    - Si no tiene PRD → activar `prd-writer` para crearlo antes de continuar.
