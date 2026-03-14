@@ -148,6 +148,7 @@ Calidad minima por spec (obligatoria):
 - secciones 1 a 9 con contenido real
 - archivos objetivo concretos (seccion 3.2)
 - criterios verificables y validacion en Access (seccion 5)
+- cabecera con trazabilidad completa (`RFC origen` y `Plan origen`)
 
 Siempre devolver al usuario:
 - ruta exacta de cada spec creada

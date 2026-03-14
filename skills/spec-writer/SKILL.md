@@ -83,7 +83,10 @@ Reglas obligatorias de contenido (anti-placeholder):
 3. Debe incluir archivos concretos en la seccion 3.2 y criterios verificables en 5.x.
 4. Debe incluir al menos un escenario de validacion en Access (5.2).
 5. Si hay cambios de UI, completar seccion 6; si no, indicar explicitamente "Sin cambios de UI".
-6. No dejar placeholders (`[ ... ]`, `AAAA-MM-DD`, `Spec-NNN`, `[...]`, `Por determinar`) en version entregada.
+6. No dejar placeholders (`[ ... ]`, `AAAA-MM-DD`, `Spec-NNN`, `RFC-NNN`, `PLAN-NNN`, `[...]`, `Por determinar`) en version entregada.
+7. Completar siempre cabecera de trazabilidad:
+   - `RFC origen`: RFC que motiva la spec, o `—` si no aplica.
+   - `Plan origen`: PLAN y tarea (`PLAN-NNN (T-XX)`), o `—` si no aplica.
 
 ---
 

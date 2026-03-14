@@ -6,6 +6,8 @@
 **Módulos PRD afectados:** [IDs o nombres separados por coma, ej: PRD-03, PRD-07]
 **Spec padre:** [Spec-NNN si es sub-tarea, o "—"]
 **Specs relacionadas:** [Spec-NNN, Spec-NNN o "—"]
+**RFC origen:** [RFC-NNN o "—"]
+**Plan origen:** [PLAN-NNN (T-XX) o "—"]
 **Fecha de creación:** AAAA-MM-DD
 **Fecha límite:** AAAA-MM-DD | Sin límite
 **Cierre:** [AAAA-MM-DD — Motivo] | Pendiente
