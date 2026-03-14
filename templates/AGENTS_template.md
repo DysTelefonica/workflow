@@ -257,7 +257,9 @@ de backends de otros sistemas.
 Para regenerar un ERD concreto:
 
 
-node {{SKILLS_DIR}}/access-vba-sync/cli.js generate-erd --backend <ruta_Datos.accdb> --erd_path docs/ERD
+node {{SKILLS_DIR}}/access-vba-sync/cli.js generate-erd --backend <ruta_Datos.accdb>
+
+(El skill genera por defecto en `docs/ERD/`. `--erd_path` es opcional.)
 
 
 ---
