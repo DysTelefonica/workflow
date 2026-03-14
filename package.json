@@ -1,0 +1,9 @@
+{
+ "name": "workflow-cli",
+ "bin": {
+  "workflow": "./cli/workflow.js"
+ },
+ "dependencies": {
+  "commander": "^14.0.3"
+ }
+}
