@@ -100,16 +100,20 @@ async function resolveAccessFiles(iface, cwd) {
 
 async function resolveSkillsDir(iface, cwd) {
   // Auto-detect en proyecto existente
+  if (fs.existsSync(path.join(cwd, ".agents", "skills"))) {
+    log("✔", "Detectado: Trae nuevo (.agents/skills/)")
+    return { skillsDir: ".agents/skills", rulesDir: ".agents/rules", detected: true }
+  }
   if (fs.existsSync(path.join(cwd, ".agents"))) {
     log("✔", "Detectado: Trae nuevo (.agents/)")
-    return { skillsDir: ".agents", rulesDir: ".agents/rules", detected: true }
+    return { skillsDir: ".agents/skills", rulesDir: ".agents/rules", detected: true }
   }
   if (fs.existsSync(path.join(cwd, ".trae", "skills"))) {
     console.log("\n  ⚠  Detectado formato Trae antiguo (.trae/skills).")
-    const ans = await ask(iface, "  ¿Migrar a .agents/ (nuevo)? S/N: ")
+    const ans = await ask(iface, "  ¿Migrar a .agents/skills/ (nuevo)? S/N: ")
     if (/^s/i.test(ans)) {
-      log("→", "Se migrará a .agents/ (el directorio .trae/ no se borrará)")
-      return { skillsDir: ".agents", rulesDir: ".agents/rules", detected: true, migrating: true, oldDir: ".trae/skills" }
+      log("→", "Se migrará a .agents/skills/ (el directorio .trae/ no se borrará)")
+      return { skillsDir: ".agents/skills", rulesDir: ".agents/rules", detected: true, migrating: true, oldDir: ".trae/skills" }
     }
     return { skillsDir: ".trae/skills", rulesDir: ".trae/rules", detected: true }
   }
@@ -124,11 +128,11 @@ async function resolveSkillsDir(iface, cwd) {
 
   // Proyecto nuevo — preguntar
   console.log("\n  ¿Qué IDE estás usando?")
-  console.log("    1) Trae   → .agents/")
+  console.log("    1) Trae   → .agents/skills/")
   console.log("    2) Claude Code / Standard → skills/")
   const choice = await ask(iface, "  IDE (1/2): ")
   if (choice === "1") {
-    return { skillsDir: ".agents", rulesDir: ".agents/rules", detected: false }
+    return { skillsDir: ".agents/skills", rulesDir: ".agents/rules", detected: false }
   }
   return { skillsDir: "skills", rulesDir: "rules", detected: false }
 }

@@ -36,10 +36,11 @@ function log(icon, msg) {
 // ---------------------------------------------------------------------------
 
 function detectSkillsDir(cwd) {
-  if (fs.existsSync(path.join(cwd, ".agents")))            return { skillsDir: ".agents", rulesDir: ".agents/rules" }
-  if (fs.existsSync(path.join(cwd, ".trae", "skills")))   return { skillsDir: ".trae/skills", rulesDir: ".trae/rules" }
-  if (fs.existsSync(path.join(cwd, ".agent", "skills")))  return { skillsDir: ".agent/skills", rulesDir: ".agent/rules" }
-  if (fs.existsSync(path.join(cwd, "skills")))            return { skillsDir: "skills", rulesDir: "rules" }
+  if (fs.existsSync(path.join(cwd, ".agents", "skills"))) return { skillsDir: ".agents/skills", rulesDir: ".agents/rules" }
+  if (fs.existsSync(path.join(cwd, ".agents")))           return { skillsDir: ".agents/skills", rulesDir: ".agents/rules" }
+  if (fs.existsSync(path.join(cwd, ".trae", "skills")))  return { skillsDir: ".trae/skills", rulesDir: ".trae/rules" }
+  if (fs.existsSync(path.join(cwd, ".agent", "skills"))) return { skillsDir: ".agent/skills", rulesDir: ".agent/rules" }
+  if (fs.existsSync(path.join(cwd, "skills")))           return { skillsDir: "skills", rulesDir: "rules" }
   return null
 }
 
