@@ -38,4 +38,9 @@ program
     }
   })
 
+program
+  .command("update")
+  .description("Actualiza skills y rules a la ultima version sin tocar el proyecto")
+  .action(require("../installers/update-access"))
+
 program.parse(process.argv)

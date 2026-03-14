@@ -303,6 +303,14 @@ module.exports = async function initAccess(opts = {}) {
       console.log("     Puedes eliminarlo cuando compruebes que todo funciona.")
     }
 
+    // 11. Escribir version del framework instalado
+    const pkgVersion = require("../package.json").version
+    fs.writeFileSync(
+      path.join(cwd, skillsDir, ".dysflow"),
+      JSON.stringify({ version: pkgVersion }),
+      "utf8"
+    )
+
     // Resumen
     console.log("\n  " + "=".repeat(40))
     console.log("  ✅  LISTO — " + (projectName || path.basename(cwd)))

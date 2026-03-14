@@ -1,0 +1,21 @@
+# Dependencias de desarrollo
+node_modules/
+
+# Control de versiones
+.git/
+.gitignore
+
+# Scripts internos de desarrollo
+scripts/
+deploy.ps1
+
+# Documentación interna
+Plan Implementacion.md
+project_context.md
+
+# Logs y variables de entorno
+*.log
+.env
+
+# node_modules anidados — access-vba-sync los instala en destino con npm install
+skills/access-vba-sync/node_modules/
