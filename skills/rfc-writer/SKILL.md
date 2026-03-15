@@ -38,6 +38,8 @@ Reglas obligatorias:
 2. Ruta obligatoria: `docs/rfcs/RFC-{NNN}_{titulo-kebab}.md`.
 3. Tras guardar, verificar que el archivo existe.
 4. No dejar placeholders (`{...}`, `X segundos`, `Y segundos`, etc.).
+5. Si el RFC afecta implementacion VBA, debe declarar explicitamente
+   el patron de manejo de errores obligatorio y como se verificara en plan/specs.
 
 ### Paso 3 — STOP: presentar y esperar aprobación
 Presentar el RFC completo al usuario.

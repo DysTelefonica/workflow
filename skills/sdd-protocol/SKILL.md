@@ -132,9 +132,13 @@ La IA ejecuta todo esto sin detenerse:
 1. Leer la Spec aprobada.
 2. Implementar cada intervención en el código fuente.
 3. Aplicar las convenciones de código de `references/project_context.md`.
-4. Auto-verificar contra los criterios de verificación de la Spec
+4. Aplicar de forma obligatoria el patron de manejo de errores del proyecto:
+   - usar estructura homogenea (`On Error GoTo`, salida controlada, `ErrorHandler`, `Cleanup` si aplica)
+   - mantener convenciones de mensajes/codigos/logging del proyecto
+   - en operaciones con transaccion: `BeginTrans` + `CommitTrans` y `Rollback` en error
+5. Auto-verificar contra los criterios de verificación de la Spec
    (revisión de código, no ejecución real).
-5. Si se modificaron formularios (`.frm.txt`) → generar Informe de Cambios UI (ver más abajo).
+6. Si se modificaron formularios (`.frm.txt`) → generar Informe de Cambios UI (ver más abajo).
 
 Presentar al usuario:
 
@@ -212,6 +216,7 @@ La IA ejecuta **todos estos pasos en orden sin detenerse:**
 - [ ] Spec archivada en docs/specs/completed/
 - [ ] Estado actualizado a ✅ VALIDADO EN ACCESS
 - [ ] PRD creado/actualizado → [archivo + resumen de cambios]
+- [ ] Patron de manejo de errores verificado en cambios VBA (incluye rollback en transacciones)
 - [ ] DEUDA_TECNICA.md actualizado → [hallazgos añadidos / resueltos / sin cambios]
 - [ ] DISCOVERY_MAP revisado → [actualizado: qué / sin impacto: justificación]
 - [ ] Diario actualizado (entrada AL PRINCIPIO, sin borrar contenido previo)
@@ -331,3 +336,5 @@ Aparece en dos sitios: dentro de la Spec (sección permanente) y en la respuesta
     marco; las Specs implementan los detalles.
 14. **Epics como Planes**: si una historia afecta a >3 módulos o tiene >5 intervenciones,
     ofrecer siempre el Plan de Actuación (opción B) antes de crear Specs individuales.
+15. **Error handling no negociable**: ninguna implementación se considera válida si no respeta
+    el patron de manejo de errores vigente del proyecto.

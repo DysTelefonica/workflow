@@ -147,6 +147,7 @@ Indicar qué método/función/evento se toca y cómo cambia su comportamiento.]
 - [ ] [Verificación estructural, ej: "Existe método `X` en clase `Y`"]
 - [ ] [Verificación de contrato, ej: "La función devuelve el tipo correcto y gestiona el error esperado"]
 - [ ] [Verificación de orden, ej: "El método `X` llama a `Y` antes de `Z`"]
+- [ ] [Verificación de patrón de errores, ej: "Cumple el patrón corporativo (On Error/Exit/ErrorHandler/Cleanup y Rollback si aplica)"]
 - [ ] [Verificación de convenciones, ej: "Nombres de variables siguen el prefijo del proyecto"]
 - [ ] No se han modificado archivos fuera del alcance declarado en la Sección 3.2
 

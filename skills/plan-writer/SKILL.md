@@ -86,6 +86,8 @@ Reglas obligatorias de salida:
 3. Si el archivo no existe, la tarea NO está completada y se debe corregir antes de responder.
 4. Los enlaces a Specs deben apuntar a `../../specs/active/...` o `../../specs/completed/...`.
 5. No dejar placeholders (`{...}`, `X segundos`, `Y segundos`, etc.).
+6. Cada tarea del plan que implique codigo VBA debe incluir como criterio minimo:
+   "cumple patron de manejo de errores del proyecto".
 
 ### Paso 4 — STOP: Validación del Plan
 

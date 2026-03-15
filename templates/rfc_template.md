@@ -81,6 +81,7 @@
 
 - [ ] {criterio 1}
 - [ ] {criterio 2}
+- [ ] Si hay cambios VBA, las Specs derivadas incluyen y verifican el patron de manejo de errores del proyecto (On Error/Exit/ErrorHandler/Cleanup y Rollback en transacciones).
 
 ## 8. Decisión
 

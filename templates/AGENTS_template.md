@@ -116,6 +116,26 @@ Solo si Engram no tiene respuesta se consulta el repositorio.
 
 ---
 
+### 6. Manejo de errores mandatorio
+
+Todo cambio en VBA debe respetar el patron de manejo de errores ya instaurado en el proyecto.
+
+Antes de escribir codigo:
+
+- localizar el patron en modulos consolidados del propio proyecto
+- aplicar la misma estructura de `On Error GoTo`, `Exit Function/Sub`, `ErrorHandler` y `Cleanup` (si aplica)
+- respetar convenciones de logging, mensajes y retorno
+
+En flujos transaccionales es obligatorio:
+
+- `BeginTrans` en entrada
+- `CommitTrans` solo en camino exitoso
+- `Rollback` en cualquier error
+
+Queda prohibido confirmar operaciones con errores silenciados o estados parciales.
+
+---
+
 # Descubrimiento de Skills
 
 Las skills disponibles para el agente se encuentran en:

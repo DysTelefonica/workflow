@@ -107,6 +107,38 @@ Nunca escribir código antes de que exista una **Spec aprobada**.
 
 ---
 
+# 5.1 Patrón de manejo de errores obligatorio (todos los proyectos)
+
+El patrón de manejo de errores del proyecto es **mandatorio** y prevalece sobre preferencias del agente.
+
+Antes de implementar cualquier cambio VBA:
+
+- identificar en `src/` el patrón real ya usado en módulos consolidados
+- replicar ese patrón exacto (estructura, labels, logging y política de retorno)
+
+Reglas mínimas obligatorias en código nuevo/modificado:
+
+- usar bloque explícito `On Error GoTo ...` (sin `On Error Resume Next` persistente)
+- definir salida controlada (`Exit Function` o `Exit Sub`) antes del bloque de error
+- incluir bloque `ErrorHandler:` con tratamiento consistente del proyecto
+- en operaciones transaccionales: `BeginTrans` + `CommitTrans` en camino feliz y `Rollback` en error
+- mantener códigos y mensajes de error según convención del proyecto
+
+Patrones prohibidos:
+
+- silencios de error
+- `Resume Next` global sin restaurar comportamiento
+- devolver éxito cuando ocurrió error
+- commits parciales si falla la operación asociada de caché o persistencia
+
+Si el patrón del proyecto no está documentado en PRD:
+
+- documentarlo primero en PRD y DISCOVERY_MAP
+- registrar lección en Engram
+- actualizar RFC/Plan/Spec afectadas para hacerlo verificable
+
+---
+
 # 6. Validación humana antes de implementar
 
 El **STOP 1 del protocolo SDD es obligatorio**.

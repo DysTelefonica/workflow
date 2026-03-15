@@ -87,6 +87,10 @@ Reglas obligatorias de contenido (anti-placeholder):
 7. Completar siempre cabecera de trazabilidad:
    - `RFC origen`: RFC que motiva la spec, o `—` si no aplica.
    - `Plan origen`: PLAN y tarea (`PLAN-NNN (T-XX)`), o `—` si no aplica.
+8. Si la Spec modifica VBA (`.bas`, `.cls`, eventos de formulario), incluir criterio explicito
+   de cumplimiento del patron de manejo de errores del proyecto.
+9. Cada intervencion de codigo debe indicar como se preserva el manejo de errores
+   (estructura de control de errores y rollback si hay transaccion).
 
 ---
 
