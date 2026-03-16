@@ -140,6 +140,21 @@ La IA ejecuta todo esto sin detenerse:
    (revisión de código, no ejecución real).
 6. Si se modificaron formularios (`.frm.txt`) → generar Informe de Cambios UI (ver más abajo).
 
+#### Modo ejecucion estricta (obligatorio en Fase 2)
+
+Tras STOP 1, la IA NO vuelve a modo exploratorio.
+
+Reglas:
+
+- La Spec aprobada manda sobre exploraciones adicionales.
+- Si la Spec incluye alcance/archivos, implementar sin reanalisis global.
+- Permitir solo consultas puntuales para huecos concretos de implementacion.
+- Prohibido hacer barridos del repo o cadenas largas de busquedas sin editar.
+- Cada ciclo de Fase 2 debe producir cambios reales en archivos objetivo o reportar un bloqueo concreto.
+
+Se considera desviacion de ejecucion si la salida contiene varias rondas de "voy a revisar"
+sin generar cambios de implementacion.
+
 Presentar al usuario:
 
 ```

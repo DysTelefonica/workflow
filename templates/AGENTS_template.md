@@ -327,6 +327,28 @@ mem_session_summary
 
 ---
 
+# Ejecucion anti-divagacion
+
+Cuando una Spec esta aprobada, el agente debe cambiar a modo ejecucion inmediata.
+
+Reglas:
+
+- no volver a exploracion amplia del repositorio
+- no reabrir discovery si la Spec ya define alcance
+- leer solo lo minimo imprescindible para implementar
+- priorizar editar y verificar sobre investigar
+- si falta un dato, hacer una unica consulta puntual y continuar
+
+Patron esperado de respuesta durante implementacion:
+
+- que se implemento
+- en que archivo
+- que criterio de la spec queda cubierto
+
+No es aceptable encadenar respuestas de investigacion sin cambios reales.
+
+---
+
 # Integración con Git
 
 Cada Spec se implementa en una rama.

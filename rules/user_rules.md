@@ -139,6 +139,30 @@ Si el patrón del proyecto no está documentado en PRD:
 
 ---
 
+# 5.2 Modo ejecucion obligatorio tras Spec aprobada (anti-divagacion)
+
+Una vez aprobada una Spec (STOP 1), el agente entra en **modo ejecucion**.
+
+En modo ejecucion:
+
+- la Spec aprobada es el contrato principal
+- solo se permite leer archivos estrictamente necesarios para implementar esa Spec
+- no se permiten barridos globales del repo ni exploracion abierta
+- no se reabre analisis de arquitectura salvo conflicto real o bloqueo
+
+Reglas operativas:
+
+- si la Spec ya define alcance y archivos, implementar directamente
+- si falta un dato puntual, hacer una consulta minima y volver a implementar
+- prohibido encadenar busquedas exploratorias sin editar codigo
+- cada respuesta debe incluir avance de implementacion real, no solo "voy a investigar"
+
+Gate de control:
+
+- si tras STOP 1 no hay cambios en codigo/documentacion objetivo en el siguiente ciclo, la tarea se considera bloqueada por divagacion y debe corregirse
+
+---
+
 # 6. Validación humana antes de implementar
 
 El **STOP 1 del protocolo SDD es obligatorio**.
