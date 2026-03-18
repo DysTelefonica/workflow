@@ -901,7 +901,7 @@ function Export-DataStructure {
             [void]$sb.AppendLine("")
             foreach ($linkedPath in $unreachableBackends) {
                 $linkedTables = $linkedSources[$linkedPath] -join ", "
-                [void]$sb.AppendLine("- ``$linkedPath`` — tablas vinculadas: $linkedTables")
+                [void]$sb.AppendLine("- ``$linkedPath`` - tablas vinculadas: $linkedTables")
             }
             [void]$sb.AppendLine("")
         }
@@ -1080,7 +1080,7 @@ try {
             Write-Status -Message ("Fix-Encoding (Access): {0}" -f $fixedAccess) -Color Yellow
         }
 
-        Write-Status -Message ("OK Fix-Encoding completado") -Color Green
+        Write-Status -Message ("Fix-Encoding completado") -Color Green
     }
 } finally {
     if ($session) {

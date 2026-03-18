@@ -82,10 +82,11 @@ Importa módulos específicos por nombre.
 node cli.js generate-erd
 ```
 
-Genera documentación de la estructura de la base de datos backend.
+Genera documentacion de la estructura de la base de datos backend en `docs/ERD/` por defecto.
 
 **Flags disponibles:**
 - `--backend "MiBD_Datos.accdb"` - Backend a documentar (autodetecta `*_Datos.accdb`)
+- `--erd_path "docs/ERD"` - Carpeta de salida (opcional, default: `docs/ERD`)
 
 ### Estado de Sesión
 

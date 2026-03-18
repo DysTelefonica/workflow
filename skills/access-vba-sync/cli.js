@@ -63,7 +63,7 @@ function printHelp() {
       "Flags:",
       "  --access <ruta>                Ruta .accdb/.accde/.mdb/.mde (relativa a CWD o absoluta)",
       "  --backend <ruta>               Ruta al Backend (_Datos) para generate-erd",
-      "  --erd_path <ruta>              Carpeta de salida para el ERD",
+      "  --erd_path <ruta>              Carpeta de salida para el ERD (default: docs/ERD)",
       "  --destination_root <carpeta>   Carpeta de export/import (default: src)",
       "  --debounce_ms <n>              Debounce/batching para watch (default: 600)",
       "  --auto_export_on_end false     Desactiva export final"
@@ -121,7 +121,7 @@ async function main() {
 
   if (command === "generate-erd") {
     const backendPath = normalizePathFlag(flags.backend);
-    const erdPath = normalizePathFlag(flags.erd_path);
+    const erdPath = normalizePathFlag(flags.erd_path || "docs/ERD");
     await skill.generateErd({ backendPath, erdPath });
     return;
   }
