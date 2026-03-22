@@ -37,8 +37,8 @@ src/
 ├── classes/          # Clases .cls
 │   └── MiClase.cls
 └── forms/            # Formularios (dos archivos por formulario)
-    ├── MiFormulario.form.txt   # UI + código completo
-    └── MiFormulario.cls        # Solo código VBA
+    ├── Form_MiFormulario.form.txt   # UI + código completo (SaveAsText)
+    └── Form_MiFormulario.cls        # Solo código VBA
 ```
 
 ## Uso
@@ -52,8 +52,9 @@ node cli.js start
 Inicia la sesión, exporta todos los módulos VBA y genera el ERD del backend.
 
 **Flags disponibles:**
-- `--access "MiBD.accdb"` - Base de datos específica (opcional, autodetecta si hay una)
-- `--destination_root src` - Carpeta de destino (default: `src`)
+- `--access "MiBD.accdb"` — Base de datos específica (opcional, autodetecta si hay una)
+- `--destination_root src` — Carpeta de destino (default: `src`)
+- `--password "micontraseña"` — Contraseña de la BD si está protegida
 
 ### Watching (Sincronización Automática)
 
@@ -62,11 +63,13 @@ node cli.js watch
 ```
 
 Monitorea cambios en `src/` e importa automáticamente a Access al guardar.
+Detecta cambios en `.bas`, `.cls`, `.frm` y `.form.txt`.
 
 **Flags disponibles:**
 - `--access "MiBD.accdb"`
 - `--destination_root src`
-- `--debounce_ms 800` - Milisegundos de espera antes de importar (default: 800)
+- `--debounce_ms 800` — Milisegundos de espera antes de importar (default: 600)
+- `--password "micontraseña"`
 
 ### Import Manual
 
@@ -74,7 +77,7 @@ Monitorea cambios en `src/` e importa automáticamente a Access al guardar.
 node cli.js import Modulo1 Modulo2
 ```
 
-Importa módulos específicos por nombre.
+Importa módulos específicos por nombre (sin extensión).
 
 ### Generar ERD
 
@@ -82,11 +85,11 @@ Importa módulos específicos por nombre.
 node cli.js generate-erd
 ```
 
-Genera documentacion de la estructura de la base de datos backend en `docs/ERD/` por defecto.
+Genera documentación de la estructura de la base de datos backend en `docs/ERD/` por defecto.
 
 **Flags disponibles:**
-- `--backend "MiBD_Datos.accdb"` - Backend a documentar (autodetecta `*_Datos.accdb`)
-- `--erd_path "docs/ERD"` - Carpeta de salida (opcional, default: `docs/ERD`)
+- `--backend "MiBD_Datos.accdb"` — Backend a documentar (autodetecta `*_Datos.accdb`)
+- `--erd_path "docs/ERD"` — Carpeta de salida (opcional, default: `docs/ERD`)
 
 ### Estado de Sesión
 
@@ -105,7 +108,7 @@ node cli.js end
 Cierra la sesión y restaura cualquier configuración de Access modificada.
 
 **Flags disponibles:**
-- `--auto_export_on_end false` - Desactivar export final
+- `--auto_export_on_end false` — Desactivar export final
 
 ## Configuración de Acceso
 
@@ -131,14 +134,18 @@ Esto copiará el skill, generará la estructura inicial y exportará el código 
 
 ### Access se abre visiblemente
 - Verifica que no hay procesos de Access zombis: `Get-Process MSACCESS | Stop-Process`
-- El skill debería ejecutarse con `Visible = false`
+- El skill abre Access con `Visible = false` — si se ve, hay una instancia previa reutilizada
 
 ### Error al exportar formulario
-- Algunos formularios con código complejo pueden fallar por errores COM
+- Algunos formularios pueden fallar por errores COM
 - El export continuará con los siguientes módulos
 
 ### La BD tiene contraseña
 - Pasa la contraseña con: `--password "micontraseña"`
+
+### Los formularios no se importan correctamente
+- Asegúrate de que Access está completamente cerrado antes de ejecutar el skill
+- El skill usa `LoadFromText` para formularios, que requiere acceso exclusivo a la BD
 
 ## Licencia
 

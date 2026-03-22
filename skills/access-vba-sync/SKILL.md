@@ -24,7 +24,7 @@ Definir un **skill** (implementación a realizar por otra IA) que automatice el 
   - `-AccessPath <ruta>` (Frontend)
   - `-BackendPath <ruta>` (Backend para ERD)
   - `-DestinationRoot <carpeta>`
-  - `-ErdPath <ruta archivo>`
+  - `-ErdPath <ruta carpeta>`
   - `-ModuleName <string[]>` (múltiples).  
   Si NO soporta array, el skill debe iterar e invocar Import 1×módulo.
 
@@ -43,31 +43,33 @@ Definir un **skill** (implementación a realizar por otra IA) que automatice el 
 ### R2. Ruta real de módulos exportados
 El skill exporta e importa directamente en subcarpetas según el tipo de módulo:
 
-`<DestinationRoot>/modules/*.bas`
-`<DestinationRoot>/classes/*.cls`
-`<DestinationRoot>/forms/*.form.txt` (UI + código completo)
-`<DestinationRoot>/forms/*.cls` (solo código VBA, para formularios)
+```
+<DestinationRoot>/modules/*.bas
+<DestinationRoot>/classes/*.cls
+<DestinationRoot>/forms/*.form.txt   (UI + código completo, generado por SaveAsText)
+<DestinationRoot>/forms/*.cls        (solo código VBA, para diff y lectura rápida)
+```
 
 Ejemplo:
 ```
 src/modules/VariablesGlobales.bas
-src/classes/Usuario.cls
+src/classes/CUsuario.cls
 src/forms/Form_FormWeb.form.txt
 src/forms/Form_FormWeb.cls
 ```
 
 ### R3. Sincronización (sync/import)
-- Dado un conjunto de módulos (por nombre), ejecutar Import **solo de esos**:
+- Dado un conjunto de módulos (por nombre, sin extensión), ejecutar Import **solo de esos**:
   - `VBAManager.ps1 -Action Import -AccessPath ... -DestinationRoot ... -ModuleName A B C`
 - Registrar en el estado: `changedModules += módulos`.
 - Tras importar: **mostrar instrucción explícita** al usuario:
-  - “Abre Access → VBE → Debug → Compile”.
+  - "Abre Access → VBE → Debug → Compile".
 
 ### R4. Auto-sync durante el trabajo (watch)
 - Vigilar `modulesPath` (que coincide con `DestinationRoot`) y detectar cambios en:
-  - `.bas`, `.cls` (y opcional `.frm` si tu proyecto lo usa).
+  - `.bas`, `.cls`, `.frm`, `.form.txt`
 - Al cambiar un archivo:
-  - Derivar `ModuleName` = basename sin extensión.
+  - Derivar `ModuleName` = basename sin extensión (para `.form.txt` quitar el sufijo completo `.form.txt`).
   - Hacer debounce/batching (ej. 500–1000 ms) y luego Import de todos los módulos tocados en esa ventana.
 - En `unlink` (borrado): avisar (no se puede borrar módulo en VBA automáticamente de forma segura).
 
@@ -113,14 +115,27 @@ El skill debe exponer al menos:
 
 ---
 
+## Comportamiento de exportación/importación de formularios
+
+Los formularios Access se gestionan de forma diferente a módulos y clases:
+
+- **Export**: usa `Application.SaveAsText(2, nombreFormulario, ruta)` para obtener la definición completa (controles, propiedades, código). El nombre del objeto Access es el nombre del VBComponent **sin** el prefijo `Form_`.
+- **Import**: usa `Application.LoadFromText(2, nombreFormulario, ruta)`. Nunca usa `VBComponents.Import()` para `.form.txt`.
+- **Access debe estar cerrado** antes de ejecutar el script para garantizar operación desatendida. Con una instancia COM headless (`Visible=false`, `UserControl=false`) no hay diálogos.
+
+---
+
 ## Estructura propuesta del paquete del skill
+
+```
 <projectRoot>/
-access-vba-sync/
-VBAManager.ps1
-handler.(js|py|ps1) # lógica principal
-cli.(js|py|ps1) # comandos start/watch/sync/end/status
-README.md
-SKILL.md # este documento
+  access-vba-sync/
+    VBAManager.ps1     # lógica PowerShell (Export/Import/Fix-Encoding/Generate-ERD)
+    handler.js         # lógica principal Node.js
+    cli.js             # comandos start/watch/sync/end/status/generate-erd
+    README.md
+    SKILL.md           # este documento
+```
 
 > Importante: el skill vive en su carpeta, pero se ejecuta con `projectRoot = cwd` (la raíz del repo), para que `src/` quede en el proyecto y no dentro del skill.
 
@@ -129,7 +144,7 @@ SKILL.md # este documento
 ## Flujo de trabajo esperado (integración)
 ### Nueva feature/fix
 1) `start` → Export total a `src/`
-2) `generate-erd` → Generar contexto de datos en `docs/structure.md` (opcional).
+2) `generate-erd` → Generar contexto de datos en `docs/ERD/` (opcional).
 3) IA modifica archivos en `src/` basándose en código y estructura de datos.
 4) `watch` (o `sync` al terminar) → Import de módulos modificados.
 5) Usuario compila en VBE cuando el skill lo recuerde.
@@ -140,16 +155,16 @@ SKILL.md # este documento
 ## Casos límite que el skill debe cubrir
 - Varias BDs en root → elección determinista + warning.
 - Ruta relativa de AccessPath (como el resto de comandos del proyecto).
-- Módulos con mismo nombre en diferentes extensiones (preferir el archivo cambiado; importar por nombre).
-- Cambios masivos (muchos guardados) → batching.
+- Módulos con mismo nombre en diferentes extensiones (preferir `.form.txt` > `.frm` > `.cls` > `.bas`).
+- Cambios masivos (muchos guardados) → batching con debounce.
 - Access abierto/bloqueado → error claro (no loops infinitos).
+- Formularios cuyo nombre no empieza por `Form_` → el script los detecta por tipo de componente (tipo 3 o 100).
 
 ---
 
 ## Pruebas mínimas
 - Start con BD única y sin BD.
 - Export crea `src/modules/`, `src/classes/` y `src/forms/`.
-- Watch: editar un `.bas` y confirmar Import.
+- Watch: editar un `.bas` y confirmar Import. Editar un `.form.txt` y confirmar Import.
 - Import manual con 2 módulos (array).
 - End: export final + resumen.
-

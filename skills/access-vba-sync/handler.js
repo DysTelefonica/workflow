@@ -26,12 +26,20 @@ function isAccessDbFileName(name) {
   return ext === ".accdb" || ext === ".accde" || ext === ".mdb" || ext === ".mde";
 }
 
+// FIX: incluir .form.txt ademas de .bas, .cls, .frm
 function isWatchedExt(filePath) {
+  const name = path.basename(filePath).toLowerCase();
+  if (name.endsWith(".form.txt")) return true;
   const ext = path.extname(filePath).toLowerCase();
   return ext === ".bas" || ext === ".cls" || ext === ".frm";
 }
 
+// FIX: extraer nombre de modulo correctamente para .form.txt
 function moduleNameFromFile(filePath) {
+  const base = path.basename(filePath);
+  if (base.toLowerCase().endsWith(".form.txt")) {
+    return base.slice(0, -".form.txt".length);
+  }
   return path.basename(filePath, path.extname(filePath));
 }
 
@@ -491,7 +499,7 @@ class AccessVbaSyncSkill {
     await this.loadSessionFromDisk();
 
     const destinationRootAbs = this.session.destinationRoot || this.resolveDestinationRoot();
-    
+
     console.log("📊 Generando ERD...");
     await this.runVbaManager({
       action: "Generate-ERD",
