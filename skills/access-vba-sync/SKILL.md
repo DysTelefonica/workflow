@@ -1,155 +1,292 @@
-# SKILL.md — Skill para workflow Access/VBA (Export → Trabajo → Sync → Compilar → ERD → Cierre)
+# SKILL.md — Skill para workflow Access/VBA
 
 ## Objetivo
-Definir un **skill** (implementación a realizar por otra IA) que automatice el workflow de desarrollo y documentación en un proyecto Microsoft Access/VBA:
 
-1) **Al inicio** de una nueva feature/fix: **Exportar TODOS los módulos** del proyecto VBA a disco (snapshot base).
-2) Se trabaja sobre la mejora editando los archivos exportados (normalmente con IA).
-3) **Todo módulo modificado por la IA debe sincronizarse** (Import) hacia el VBA real de la BD.
-4) Tras cada sincronización, el skill **debe proponer al usuario compilar** el proyecto en el VBE.
-5) **Generación de documentación**: Extraer estructura de tablas (ERD/Diccionario) a Markdown para contexto de la IA.
-6) **Al cerrar** la tarea (fin de sesión): export final opcional (snapshot consistente) + resumen.
-
-> El skill debe ser **autocontenido**: incluir dentro **VBAManager.ps1** y todo lo necesario para ejecutarse.
+Automatizar el workflow de desarrollo entre código VBA de Microsoft Access y archivos de texto en disco, permitiendo que una IA (o un desarrollador) edite el código fuentes y lo sincronice con la BD.
 
 ---
 
-## Alcance y supuestos
-- Entorno: **Windows** con Microsoft Access instalado (automatización COM y DAO).
-- El repositorio contiene una BD Access (`.accdb/.accde/.mdb/.mde`) en la raíz del proyecto, o el usuario la pasa por parámetro.
-- La exportación se guarda bajo una carpeta configurable `src/`.
-- La documentación se genera en `docs/` o ruta configurable.
-- Se asume que `VBAManager.ps1` soporta:
-  - `-Action Export|Import|Fix-Encoding|Generate-ERD`
-  - `-AccessPath <ruta>` (Frontend)
-  - `-BackendPath <ruta>` (Backend para ERD)
-  - `-DestinationRoot <carpeta>`
-  - `-ErdPath <ruta archivo>`
-  - `-ModuleName <string[]>` (múltiples).  
-  Si NO soporta array, el skill debe iterar e invocar Import 1×módulo.
+## ⚠️ REGLA CRÍTICA: IMPORTACIÓN DIFERENCIADA POR TIPO DE CAMBIO
+
+| Tipo de cambio | Archivos a importar | Comando |
+|----------------|---------------------|---------|
+| **Código VBA de formulario** (sin UI) | Solo `.cls` | `node cli.js import Form_Nombre [Form_Otro ...]` |
+| **UI de formulario** (controles, layout, propiedades) | `.cls` + `.form.txt` | `node cli.js import-form Form_Nombre [Form_Otro ...]` |
+| **Módulo .bas o clase .cls** | Solo el archivo | `node cli.js import NombreModulo [Modulo2 ...]` |
+
+> **Se pueden pasar VARIOS formularios o módulos a la vez** — el CLI los procesa todos en una sola ejecución.
+
+**¿Por qué esta distinción?**
+- `import` → solo código VBA (`.cls` de formulario o `.bas`/`.cls` normal)
+- `import-form` → toda la UI del formulario (`.form.txt`) + código
+
+**Si importás `.form.txt` cuando no tocaste la UI, podés perder cambios de layout hechos en Access.**
 
 ---
 
-## Requisitos funcionales (MUST)
-### R1. Inicio de sesión (start)
-- Detectar `AccessPath`:
-  - Si el usuario lo pasa: usarlo (aceptar rutas relativas a project root).
-  - Si no: autodetectar en project root: `.accdb/.accde/.mdb/.mde`.  
-    Si hay varias, elegir determinista (alfabético) y avisar.
-- Ejecutar: `VBAManager.ps1 -Action Export -AccessPath ... -DestinationRoot ...`
-- Persistir estado de sesión en disco (para que `sync/end/status` funcionen sin mantener proceso vivo):
-  - accessPath, destinationRoot, modulesPath, startedAt, changedModules.
+## ⚠️ REGLA DE ORO: SIEMPRE USAR EL CLI
 
-### R2. Ruta real de módulos exportados
-El skill exporta e importa directamente en subcarpetas según el tipo de módulo:
+**NUNCA llamar directamente al `VBAManager.ps1`.** 
 
-`<DestinationRoot>/modules/*.bas`
-`<DestinationRoot>/classes/*.cls`
-`<DestinationRoot>/forms/*.form.txt` (UI + código completo)
-`<DestinationRoot>/forms/*.cls` (solo código VBA, para formularios)
+Usar SIEMPRE el `cli.js` como interfaz:
 
-Ejemplo:
-```
-src/modules/VariablesGlobales.bas
-src/classes/Usuario.cls
-src/forms/Form_FormWeb.form.txt
-src/forms/Form_FormWeb.cls
+```powershell
+node cli.js <comando>
 ```
 
-### R3. Sincronización (sync/import)
-- Dado un conjunto de módulos (por nombre), ejecutar Import **solo de esos**:
-  - `VBAManager.ps1 -Action Import -AccessPath ... -DestinationRoot ... -ModuleName A B C`
-- Registrar en el estado: `changedModules += módulos`.
-- Tras importar: **mostrar instrucción explícita** al usuario:
-  - “Abre Access → VBE → Debug → Compile”.
+El CLI maneja correctamente el directorio de trabajo (`cwd`), la resolución de rutas y los parámetros.
 
-### R4. Auto-sync durante el trabajo (watch)
-- Vigilar `modulesPath` (que coincide con `DestinationRoot`) y detectar cambios en:
-  - `.bas`, `.cls` (y opcional `.frm` si tu proyecto lo usa).
-- Al cambiar un archivo:
-  - Derivar `ModuleName` = basename sin extensión.
-  - Hacer debounce/batching (ej. 500–1000 ms) y luego Import de todos los módulos tocados en esa ventana.
-- En `unlink` (borrado): avisar (no se puede borrar módulo en VBA automáticamente de forma segura).
+**❌ MAL (no usar):**
+```powershell
+.\VBAManager.ps1 -Action Export ...
+```
 
-### R5. Generación de ERD (generate-erd)
-- Extraer la estructura de tablas de un backend a formato Markdown.
-- Parámetros:
-  - `--backend <ruta>`: Ruta al archivo `*_Datos.accdb` del que se extrae el ERD.
-  - `--erd_path <carpeta>`: Carpeta de salida. El archivo se nombra igual que el backend (`NombreBackend.md`).
-- Ejecutar: `VBAManager.ps1 -Action Generate-ERD -BackendPath ... -ErdPath ...`
-- Autodetectar backend si no se especifica (buscar `*_Datos.accdb` en root).
-- **Un ERD por backend**: si el sistema tiene tablas vinculadas de otros backends,
-  se debe ejecutar `generate-erd` para cada `*_Datos.accdb` implicado.
-  Todos los ERDs se depositan en `docs/ERD/` con el nombre del propio archivo.
-- El agente debe leer **todos los archivos de `docs/ERD/`** para tener el modelo
-  de datos completo (backend propio + backends vinculados de otros sistemas).
-
-### R6. Fin de sesión (end)
-- Parar watcher si está activo.
-- Si hay cambios pendientes: hacer sync final.
-- Export final opcional (configurable): `-Action Export`.
-- Imprimir resumen: nº módulos sincronizados + lista.
-
-### R7. Comandos mínimos del skill
-El skill debe exponer al menos:
-- `start` (export inicial + estado)
-- `watch` (start si no hay sesión + auto-sync)
-- `sync`/`import <Mod...>` (import manual por lista)
-- `generate-erd` (documentación de tablas)
-- `end` (cierre + export final opcional)
-- `status` (estado de sesión)
+**✅ BIEN (siempre así):**
+```powershell
+node cli.js export MiModulo
+```
 
 ---
 
-## Requisitos no funcionales (SHOULD)
-- No bloquear el hilo principal: ejecutar PowerShell como proceso hijo (capturar stdout/stderr).
-- Log claro y accionable (qué módulo se importó y por qué).
-- Fallos: si Import falla, mostrar el error + stdout/stderr del PS1.
-- Configurable por fichero (ej. `skill.config.json`) o flags:
-  - destinationRoot (default `src`)
-  - debounceMs
-  - autoExportOnStart / autoExportOnEnd
-- No depender de servicios externos; todo local.
+## Estructura de archivos exportados
+
+```
+src/
+├── modules/                    # Módulos estándar (.bas)
+│   └── MiModulo.bas
+├── classes/                    # Clases VBA (.cls)
+│   └── CUsuario.cls
+└── forms/                     # Formularios Access (DOS archivos por formulario)
+    ├── Form_MiForm.form.txt   # UI + código completo (SaveAsText)
+    └── Form_MiForm.cls        # Solo código VBA (para diff y edición)
+```
+
+**Importante:** Cada formulario genera DOS archivos:
+- `.form.txt` → contiene UI (controles, propiedades) + código VBA
+- `.cls` → contiene SOLO el código VBA
 
 ---
 
-## Estructura propuesta del paquete del skill
-<projectRoot>/
-access-vba-sync/
-VBAManager.ps1
-handler.(js|py|ps1) # lógica principal
-cli.(js|py|ps1) # comandos start/watch/sync/end/status
-README.md
-SKILL.md # este documento
+## Comandos esenciales (con ejemplos)
 
-> Importante: el skill vive en su carpeta, pero se ejecuta con `projectRoot = cwd` (la raíz del repo), para que `src/` quede en el proyecto y no dentro del skill.
+### Exportar módulos
+
+```powershell
+# Exportar UN módulo específico (código .bas o .cls)
+node cli.js export MiModulo
+
+# Exportar VARIOS módulos a la vez
+node cli.js export ModuloA ModuloB ModuloC
+
+# Exportar un formulario (genera .form.txt + .cls)
+node cli.js export-form Form_MiFormulario
+
+# Exportar VARIOS formularios a la vez
+node cli.js export-form Form_FormGestion Form_FormDetalle Form_FormNC
+
+# Exportar TODOS los módulos (start de sesión)
+node cli.js start
+
+# Exportar todo sin iniciar sesión
+node cli.js export-all
+```
+
+### Importar módulos (código)
+
+```powershell
+# Importar código (.bas/.cls) de UN módulo — NO toca .form.txt
+node cli.js import MiModulo
+
+# Importar VARIOS módulos de código a la vez
+node cli.js import ModuloA ModuloB ModuloC
+
+# Importar código de UN formulario (.cls) — NO toca .form.txt
+# Usa esto cuando solo cambiaste código VBA del formulario, NO la UI
+node cli.js import Form_MiFormulario
+
+# Importar código de VARIOS formularios a la vez
+node cli.js import Form_MiFormulario Form_OtroFormulario
+
+# Importar TODOS los módulos de código (no formularios)
+node cli.js import-all
+```
+
+### Importar formularios (UI + código)
+
+```powershell
+# Importar formulario completo (.form.txt) — UI + código VBA
+# Usa esto cuando cambiaste controles, propiedades, o addediste/removiste controles
+node cli.js import-form Form_MiFormulario
+
+# Importar VARIOS formularios completos a la vez
+node cli.js import-form Form_FormGestion Form_FormDetalle Form_FormNC
+
+# Importar TODOS los formularios
+node cli.js import-form-all
+```
 
 ---
 
-## Flujo de trabajo esperado (integración)
-### Nueva feature/fix
-1) `start` → Export total a `src/`
-2) `generate-erd` → Generar contexto de datos en `docs/structure.md` (opcional).
-3) IA modifica archivos en `src/` basándose en código y estructura de datos.
-4) `watch` (o `sync` al terminar) → Import de módulos modificados.
-5) Usuario compila en VBE cuando el skill lo recuerde.
-6) `end` → sync final + export final opcional.
+## 🔑 CUANDO CAMBIAS CÓDIGO VBA DE UN FORMULARIO
+
+Si solo editás el código VBA de un formulario (sin tocar UI):
+
+```powershell
+# 1. Exportás el formulario para tener la versión actualizada
+node cli.js export-form Form_MiFormulario
+
+# 2. Editás el .cls (código VBA)
+#    src/forms/Form_MiFormulario.cls
+
+# 3. Importás SOLO el código (NO la UI)
+node cli.js import Form_MiFormulario
+```
+
+**❌ NO hacer:** `import-form` → esto reimporta la UI completa y puede perder cambios de layout hechos en Access.
 
 ---
 
-## Casos límite que el skill debe cubrir
-- Varias BDs en root → elección determinista + warning.
-- Ruta relativa de AccessPath (como el resto de comandos del proyecto).
-- Módulos con mismo nombre en diferentes extensiones (preferir el archivo cambiado; importar por nombre).
-- Cambios masivos (muchos guardados) → batching.
-- Access abierto/bloqueado → error claro (no loops infinitos).
+## 🔑 CUANDO CAMBIAS LA UI DE UN FORMULARIO
+
+Si agregaste/removiste controles, cambiaste propiedades de controles, o modificaste el layout:
+
+```powershell
+# 1. Exportás el formulario (para tener base .form.txt limpia)
+node cli.js export-form Form_MiFormulario
+
+# 2. Editás el .form.txt (UI + código)
+#    src/forms/Form_MiFormulario.form.txt
+
+# 3. Importás el formulario completo (UI + código)
+node cli.js import-form Form_MiFormulario
+```
 
 ---
 
-## Pruebas mínimas
-- Start con BD única y sin BD.
-- Export crea `src/modules/`, `src/classes/` y `src/forms/`.
-- Watch: editar un `.bas` y confirmar Import.
-- Import manual con 2 módulos (array).
-- End: export final + resumen.
+## Workflow típico con IA
 
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ 1. INICIO: Exportar módulo a modificar                          │
+│    node cli.js export-form Form_NCProyecto                      │
+│    (o node cli.js export MiModulo si es un .bas)                │
+└────────────────────────┬────────────────────────────────────────┘
+                         ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 2. IA EDITORIAL: Modifica los archivos en src/                  │
+│    - Código VBA → editar .cls (formularios) o .bas (módulos)   │
+│    - UI formularios → editar .form.txt                          │
+└────────────────────────┬────────────────────────────────────────┘
+                         ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 3. SINCRONIZAR: Importar cambios a Access                       │
+│                                                                 │
+│    Si solo cambiaste CÓDIGO de formulario:                      │
+│    → node cli.js import Form_NCProyecto                         │
+│                                                                 │
+│    Si cambiaste UI de formulario:                               │
+│    → node cli.js import-form Form_NCProyecto                    │
+│                                                                 │
+│    Si cambiaste módulos/clases:                                 │
+│    → node cli.js import MiModulo                                │
+└────────────────────────┬────────────────────────────────────────┘
+                         ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 4. COMPILAR: Abrir Access → VBE → Debug → Compile              │
+│    (Obligatorio tras cada importación)                          │
+└────────────────────────┬────────────────────────────────────────┘
+                         ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 5. PROBAR: Validar que los cambios funcionan en Access          │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Mode Watch (automático)
+
+El modo watch detecta cambios en archivos y los importa automáticamente:
+
+```powershell
+node cli.js watch
+```
+
+A partir de entonces:
+- Guardás un `.bas` → se importa automáticamente
+- Guardás un `.cls` de formulario → se importa automáticamente como código
+- Guardás un `.form.txt` → se importa automáticamente como formulario
+
+---
+
+## Sesión y estado
+
+El skill mantiene estado en `.access-vba-skill/session.json`:
+
+```powershell
+node cli.js status    # Ver estado actual
+node cli.js end       # Cerrar sesión (export final opcional)
+```
+
+---
+
+## Generar documentación ERD
+
+```powershell
+# Genera docs/ERD/NombreBackend.md
+node cli.js generate-erd
+
+# Con backend específico
+node cli.js generate-erd --backend "MiBackend.accdb" --erd_path "docs/ERD"
+```
+
+---
+
+## Flags disponibles
+
+| Flag | Descripción | Default |
+|------|-------------|---------|
+| `--access <ruta>` | Ruta a la BD (.accdb) | Autodetecta en CWD |
+| `--password <pwd>` | Contraseña de la BD | — |
+| `--destination_root <dir>` | Carpeta de trabajo | `src` |
+| `--debounce_ms <n>` | Ms espera antes de importar en watch | `600` |
+
+---
+
+## Requisitos
+
+- **Windows** con Microsoft Access instalado
+- **La BD debe estar cerrada** antes de ejecutar cualquier comando
+- El `cli.js` usa `cwd` del proceso Node → ejecutar desde la raíz del proyecto
+
+---
+
+## Resolución de problemas
+
+### "Access está bloqueado"
+La BD está abierta en Access. Cerrarla antes de usar el skill.
+
+```powershell
+Get-Process MSACCESS | Stop-Process -Force
+```
+
+### "Módulo no encontrado"
+- Verificar que el nombre del módulo sea exacto (incluir prefijo `Form_` para formularios)
+- Usar `node cli.js status` para ver módulos disponibles
+
+### "Subíndice fuera del intervalo"
+- Para formularios, usar el nombre con prefijo `Form_`: `Form_MiFormulario`, no `MiFormulario`
+
+---
+
+## Resumen rápido
+
+| Qué necesito | Comando | ¿Qué importa? |
+|--------------|---------|---------------|
+| Exportar módulo(s) | `node cli.js export ModA ModB` | `.bas` o `.cls` |
+| Exportar formulario(s) | `node cli.js export-form Form_A Form_B` | `.form.txt` + `.cls` |
+| Importar código VBA (formulario) | `node cli.js import Form_A Form_B` | **Solo `.cls`** |
+| Importar UI formulario(s) | `node cli.js import-form Form_A Form_B` | **`.form.txt` + `.cls`** |
+| Importar módulo/clase(s) | `node cli.js import ModA ModB` | `.bas` o `.cls` |
+| Sincronización automática | `node cli.js watch` | Auto-detecta tipo |
+| Estado de sesión | `node cli.js status` | — |
+| Cerrar sesión | `node cli.js end` | — |

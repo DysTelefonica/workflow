@@ -26,12 +26,20 @@ function isAccessDbFileName(name) {
   return ext === ".accdb" || ext === ".accde" || ext === ".mdb" || ext === ".mde";
 }
 
+// FIX: incluir .form.txt ademas de .bas, .cls, .frm
 function isWatchedExt(filePath) {
+  const name = path.basename(filePath).toLowerCase();
+  if (name.endsWith(".form.txt")) return true;
   const ext = path.extname(filePath).toLowerCase();
   return ext === ".bas" || ext === ".cls" || ext === ".frm";
 }
 
+// FIX: extraer nombre de modulo correctamente para .form.txt
 function moduleNameFromFile(filePath) {
+  const base = path.basename(filePath);
+  if (base.toLowerCase().endsWith(".form.txt")) {
+    return base.slice(0, -".form.txt".length);
+  }
   return path.basename(filePath, path.extname(filePath));
 }
 
@@ -42,6 +50,7 @@ class AccessVbaSyncSkill {
     this.destinationRoot = options.destinationRoot || "src";
     this.debounceMs = Number.isFinite(options.debounceMs) ? options.debounceMs : 600;
     this.autoExportOnEnd = options.autoExportOnEnd !== false;
+    this.password = options.password || null;
 
     this.vbaManagerPath = path.join(this.skillDir, "VBAManager.ps1");
     this.stateDir = path.join(this.projectRoot, ".access-vba-skill");
@@ -132,7 +141,7 @@ class AccessVbaSyncSkill {
     return destinationRootAbs;
   }
 
-  runVbaManager({ action, accessPath, destinationRootAbs, moduleNames = [], backendPath, erdPath }) {
+  runVbaManager({ action, accessPath, destinationRootAbs, moduleNames = [], backendPath, erdPath, location, formOnly }) {
     return new Promise((resolve, reject) => {
       const exe = powershellExe();
       const args = [
@@ -155,9 +164,24 @@ class AccessVbaSyncSkill {
       if (erdPath) {
         args.push("-ErdPath", erdPath);
       }
+      if (location) {
+        args.push("-Location", location);
+      }
 
+      // FormOnly: switch en PS1 — se pasa como -FormOnly (sin valor) para activar el switch
+      if (formOnly === true) {
+        args.push("-FormOnly");
+      }
+
+      // ModuleName: pasar como JSON array string para evitar problemas de shell/PowerShell
+      // El PS1 lo parsea con ConvertFrom-Json
       if (Array.isArray(moduleNames) && moduleNames.length > 0) {
-        args.push("-ModuleName", ...moduleNames);
+        const modulesJson = JSON.stringify(moduleNames);
+        args.push("-ModuleNameJson", modulesJson);
+      }
+
+      if (this.password) {
+        args.push("-Password", this.password);
       }
 
       const child = spawn(exe, args, {
@@ -234,7 +258,8 @@ class AccessVbaSyncSkill {
     await this.saveSessionToDisk();
   }
 
-  async importModules({ moduleNames, accessPath } = {}) {
+  // formOnly: true = solo .form.txt (formularios), false = excluye .form.txt (código)
+  async importModules({ moduleNames, accessPath, formOnly = false } = {}) {
     await this.ensureReady();
     await this.loadSessionFromDisk();
 
@@ -250,14 +275,16 @@ class AccessVbaSyncSkill {
     const mods = uniq((moduleNames || []).map(String).filter(Boolean));
     if (mods.length === 0) throw new Error("No se especificaron módulos para importar.");
 
-    console.log(`🔄 Importando ${mods.length} módulo(s): ${mods.join(", ")}`);
+    const tipo = formOnly ? "formularios (.form.txt)" : "código (.bas/.cls)";
+    console.log(`🔄 Importando ${mods.length} módulo(s) [${tipo}]: ${mods.join(", ")}`);
 
     try {
       await this.runVbaManager({
         action: "Import",
         accessPath: dbPath,
         destinationRootAbs,
-        moduleNames: mods
+        moduleNames: mods,
+        formOnly
       });
     } catch (err) {
       if (mods.length > 1 && this.looksLikeModuleArrayNotSupported(err)) {
@@ -266,7 +293,8 @@ class AccessVbaSyncSkill {
             action: "Import",
             accessPath: dbPath,
             destinationRootAbs,
-            moduleNames: [m]
+            moduleNames: [m],
+            formOnly
           });
         }
       } else {
@@ -486,12 +514,187 @@ class AccessVbaSyncSkill {
     if (changed.length > 0) console.log("   " + changed.join(", "));
   }
 
+  async fixEncoding({ moduleNames, accessPath, location = "Both" } = {}) {
+    await this.ensureReady();
+    await this.loadSessionFromDisk();
+
+    const destinationRootAbs = this.session.destinationRoot || this.resolveDestinationRoot();
+    const dbPath = this.session.accessPath || (await this.detectAccessPath({ accessPath }));
+    if (!dbPath) throw new Error("No hay BD detectada para fix-encoding.");
+
+    const mods = moduleNames && moduleNames.length > 0
+      ? uniq(moduleNames.map(String).filter(Boolean))
+      : [];
+
+    const desc = mods.length > 0 ? mods.join(", ") : "todos los módulos";
+    console.log(`🔧 Fix-encoding (location: ${location}) — ${desc}...`);
+
+    await this.runVbaManager({
+      action: "Fix-Encoding",
+      accessPath: dbPath,
+      destinationRootAbs,
+      moduleNames: mods,
+      location
+    });
+
+    console.log("✓ Fix-encoding completado.");
+  }
+
+  async exportModules({ moduleNames, accessPath } = {}) {
+    await this.ensureReady();
+    await this.loadSessionFromDisk();
+
+    if (!this.session.active) {
+      await this.start({ accessPath });
+      await this.loadSessionFromDisk();
+    }
+
+    const destinationRootAbs = this.session.destinationRoot || this.resolveDestinationRoot();
+    const dbPath = this.session.accessPath || (await this.detectAccessPath({ accessPath }));
+    if (!dbPath) throw new Error("No hay BD detectada para exportar.");
+
+    const mods = uniq((moduleNames || []).map(String).filter(Boolean));
+    if (mods.length === 0) throw new Error("No se especificaron módulos para exportar.");
+
+    console.log(`📤 Exportando ${mods.length} módulo(s): ${mods.join(", ")}`);
+
+    await this.runVbaManager({
+      action: "Export",
+      accessPath: dbPath,
+      destinationRootAbs,
+      moduleNames: mods
+    });
+
+    console.log("✓ Export completado.");
+  }
+
+  async exportAll({ accessPath } = {}) {
+    await this.ensureReady();
+    await this.loadSessionFromDisk();
+
+    const detectedAccess = await this.detectAccessPath({ accessPath });
+    if (!detectedAccess) throw new Error("No hay BD detectada para exportar.");
+
+    const destinationRootAbs = this.session.destinationRoot || this.resolveDestinationRoot();
+
+    console.log("📤 Exportando todos los módulos...");
+    await this.runVbaManager({
+      action: "Export",
+      accessPath: detectedAccess,
+      destinationRootAbs
+    });
+    console.log("✓ Export completado.");
+  }
+
+  async importAll({ accessPath } = {}) {
+    await this.ensureReady();
+    await this.loadSessionFromDisk();
+
+    if (!this.session.active) {
+      await this.start({ accessPath });
+      await this.loadSessionFromDisk();
+    }
+
+    const destinationRootAbs = this.session.destinationRoot || this.resolveDestinationRoot();
+    const dbPath = this.session.accessPath || (await this.detectAccessPath({ accessPath }));
+    if (!dbPath) throw new Error("No hay BD detectada para importar.");
+
+    console.log("📥 Importando todos los módulos desde src/...");
+    await this.runVbaManager({
+      action: "Import",
+      accessPath: dbPath,
+      destinationRootAbs
+    });
+
+    console.log("✅ Import-all completado.");
+    console.log("Abre Access → VBE → Debug → Compile");
+  }
+
+  // Import solo formularios (.form.txt)
+  async importFormModules({ moduleNames, accessPath } = {}) {
+    await this.ensureReady();
+    await this.loadSessionFromDisk();
+
+    if (!this.session.active) {
+      await this.start({ accessPath });
+      await this.loadSessionFromDisk();
+    }
+
+    const destinationRootAbs = this.session.destinationRoot || this.resolveDestinationRoot();
+    const dbPath = this.session.accessPath || (await this.detectAccessPath({ accessPath }));
+    if (!dbPath) throw new Error("No hay BD detectada para importar.");
+
+    const mods = uniq((moduleNames || []).map(String).filter(Boolean));
+    if (mods.length === 0) throw new Error("No se especificaron formularios para importar.");
+
+    console.log(`🔄 Importando ${mods.length} formulario(s) [.form.txt]: ${mods.join(", ")}`);
+
+    try {
+      await this.runVbaManager({
+        action: "Import",
+        accessPath: dbPath,
+        destinationRootAbs,
+        moduleNames: mods,
+        formOnly: true
+      });
+    } catch (err) {
+      if (mods.length > 1 && this.looksLikeModuleArrayNotSupported(err)) {
+        for (const m of mods) {
+          await this.runVbaManager({
+            action: "Import",
+            accessPath: dbPath,
+            destinationRootAbs,
+            moduleNames: [m],
+            formOnly: true
+          });
+        }
+      } else {
+        throw err;
+      }
+    }
+
+    const now = new Date().toISOString();
+    this.session.lastSyncAt = now;
+    this.session.changedModules = uniq([...(this.session.changedModules || []), ...mods]);
+    this.session.pendingModules = [];
+    await this.saveSessionToDisk();
+
+    console.log("✅ Import-form terminado.");
+    console.log("Abre Access → VBE → Debug → Compile");
+  }
+
+  // Import todos los formularios desde src/
+  async importFormAll({ accessPath } = {}) {
+    await this.ensureReady();
+    await this.loadSessionFromDisk();
+
+    if (!this.session.active) {
+      await this.start({ accessPath });
+      await this.loadSessionFromDisk();
+    }
+
+    const destinationRootAbs = this.session.destinationRoot || this.resolveDestinationRoot();
+    const dbPath = this.session.accessPath || (await this.detectAccessPath({ accessPath }));
+    if (!dbPath) throw new Error("No hay BD detectada para importar.");
+
+    console.log("📥 Importando todos los formularios [.form.txt] desde src/...");
+    await this.runVbaManager({
+      action: "Import",
+      accessPath: dbPath,
+      destinationRootAbs,
+      formOnly: true
+    });
+
+    console.log("✅ Import-form-all completado.");
+    console.log("Abre Access → VBE → Debug → Compile");
+  }
+
   async generateErd({ backendPath, erdPath } = {}) {
     await this.ensureReady();
     await this.loadSessionFromDisk();
 
     const destinationRootAbs = this.session.destinationRoot || this.resolveDestinationRoot();
-    
+
     console.log("📊 Generando ERD...");
     await this.runVbaManager({
       action: "Generate-ERD",
@@ -501,6 +704,34 @@ class AccessVbaSyncSkill {
       erdPath
     });
     console.log("✅ ERD Generado.");
+  }
+
+  async deleteModules({ moduleNames, accessPath } = {}) {
+    await this.ensureReady();
+    await this.loadSessionFromDisk();
+
+    if (!this.session.active) {
+      await this.start({ accessPath });
+      await this.loadSessionFromDisk();
+    }
+
+    const destinationRootAbs = this.session.destinationRoot || this.resolveDestinationRoot();
+    const dbPath = this.session.accessPath || (await this.detectAccessPath({ accessPath }));
+    if (!dbPath) throw new Error("No hay BD detectada para eliminar módulos.");
+
+    const mods = uniq((moduleNames || []).map(String).filter(Boolean));
+    if (mods.length === 0) throw new Error("No se especificaron módulos para eliminar.");
+
+    console.log(`🗑️  Eliminando ${mods.length} módulo(s): ${mods.join(", ")}`);
+
+    await this.runVbaManager({
+      action: "Delete",
+      accessPath: dbPath,
+      destinationRootAbs,
+      moduleNames: mods
+    });
+
+    console.log("✅ Delete terminado.");
   }
 
   async status() {

@@ -1,0 +1,15 @@
+{
+  "default": "backend_principal",
+  "backends": {
+    "backend_principal": {
+      "path": "C:\\Users\\adm1\\Telefonica\\Aplicaciones_dys.TMETF - Aplicaciones PpD\\HPS\\00_HPS\\HPST.accdb",
+      "password": "dpddpd",
+      "description": "Backend principal HPST_datos (datos reales)"
+    },
+    "backend_cache": {
+      "path": "C:\\Users\\adm1\\Telefonica\\Aplicaciones_dys.TMETF - Aplicaciones PpD\\HPS\\00_HPS\\HPS.accdb",
+      "password": "dpddpd",
+      "description": "Frontend HPS con tablas cache"
+    }
+  }
+}

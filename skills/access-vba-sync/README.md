@@ -9,8 +9,10 @@ Permite trabajar con el código VBA de Microsoft Access como archivos de texto p
 ### Características Principales
 
 - **Export desatendido**: Extrae todos los módulos VBA sin ejecutar formularios de inicio ni macros AutoExec
-- **Estructura organizada**: Separa automáticamente en carpetas según el tipo de módulo
+- **Export/Import selectivo**: Opera sobre módulos individuales por nombre
+- **Estructura organizada**: Separa automáticamente en carpetas según el tipo (`modules/`, `classes/`, `forms/`)
 - **Sincronización automática**: Detecta cambios en archivos y los importa a Access en tiempo real
+- **Fix-encoding**: Corrige archivos con BOM UTF-8 o encoding incorrecto, en src/ o en la BD
 - **Generación de ERD**: Exporta la estructura de la base de datos backend a Markdown
 - **Sesiones persistentes**: Mantiene estado entre ejecuciones
 
@@ -32,114 +34,253 @@ npm install
 
 ```
 src/
-├── modules/          # Módulos .bas
+├── modules/          # Módulos estándar (.bas)
 │   └── MiModulo.bas
-├── classes/          # Clases .cls
-│   └── MiClase.cls
-└── forms/            # Formularios (dos archivos por formulario)
-    ├── MiFormulario.form.txt   # UI + código completo
-    └── MiFormulario.cls        # Solo código VBA
+├── classes/          # Clases VBA (.cls)
+│   └── CUsuario.cls
+└── forms/            # Formularios Access
+    ├── Form_MiForm.form.txt   # UI + código completo (vía SaveAsText)
+    └── Form_MiForm.cls        # Solo código VBA (para diff y lectura rápida)
 ```
 
-## Uso
+## Comandos
 
-### Iniciar Sesión
+### `start` — Iniciar sesión
 
 ```powershell
-node cli.js start
+node cli.js start [--access <ruta>] [--destination_root <dir>] [--password <pwd>]
 ```
 
-Inicia la sesión, exporta todos los módulos VBA y genera el ERD del backend.
+Exporta todos los módulos de la BD hacia `src/` e inicia la sesión. Punto de partida de cualquier sesión de trabajo.
 
-**Flags disponibles:**
-- `--access "MiBD.accdb"` - Base de datos específica (opcional, autodetecta si hay una)
-- `--destination_root src` - Carpeta de destino (default: `src`)
+---
 
-### Watching (Sincronización Automática)
+### `watch` — Sincronización automática
 
 ```powershell
-node cli.js watch
+node cli.js watch [--access <ruta>] [--destination_root <dir>] [--debounce_ms <n>] [--password <pwd>]
 ```
 
-Monitorea cambios en `src/` e importa automáticamente a Access al guardar.
+Inicia sesión (si no hay una activa) y monitoriza cambios en `src/`. Al guardar un archivo `.bas`, `.cls`, `.frm` o `.form.txt`, lo importa automáticamente a la BD con debounce.
 
-**Flags disponibles:**
-- `--access "MiBD.accdb"`
-- `--destination_root src`
-- `--debounce_ms 800` - Milisegundos de espera antes de importar (default: 800)
+---
 
-### Import Manual
+### `export <Mod...>` — Exportar módulos específicos
 
 ```powershell
-node cli.js import Modulo1 Modulo2
+node cli.js export Form_FormInicial Utilidades [--access <ruta>] [--password <pwd>]
 ```
 
-Importa módulos específicos por nombre.
+Exporta uno o más módulos por nombre desde la BD hacia `src/`. El nombre es el del VBComponent (con prefijo `Form_` para formularios).
 
-### Generar ERD
+---
+
+### `export-all` — Exportar todos los módulos
 
 ```powershell
-node cli.js generate-erd
+node cli.js export-all [--access <ruta>] [--destination_root <dir>] [--password <pwd>]
 ```
 
-Genera documentacion de la estructura de la base de datos backend en `docs/ERD/` por defecto.
+Exporta todos los módulos de la BD hacia `src/`. Equivalente a `start` pero sin iniciar sesión.
 
-**Flags disponibles:**
-- `--backend "MiBD_Datos.accdb"` - Backend a documentar (autodetecta `*_Datos.accdb`)
-- `--erd_path "docs/ERD"` - Carpeta de salida (opcional, default: `docs/ERD`)
+---
 
-### Estado de Sesión
+### `export-form <Mod...>` — Exportar formularios
+
+```powershell
+node cli.js export-form Form_FormInicial Form_FormGestion [--access <ruta>] [--password <pwd>]
+```
+
+Exporta uno o más **formularios** específicos (`.form.txt`) hacia `src/`. Usa `SaveAsText` para obtener UI + código completo.
+
+---
+
+### `import <Mod...>` — Importar módulos específicos (código)
+
+```powershell
+node cli.js import Utilidades Validaciones [--access <ruta>] [--password <pwd>]
+```
+
+Importa uno o más módulos de **código** (`.bas/.cls`) desde `src/` hacia la BD — excluye `.form.txt`. Tras importar recuerda compilar en el VBE.
+
+---
+
+### `import-form <Mod...>` — Importar formularios
+
+```powershell
+node cli.js import-form Form_FormInicial Form_FormGestion [--access <ruta>] [--password <pwd>]
+```
+
+Importa uno o más **formularios** (`.form.txt`) hacia la BD — usa `LoadFromText`. Ignora archivos de código.
+
+---
+
+### `import-all` — Importar todos los módulos (código)
+
+```powershell
+node cli.js import-all [--access <ruta>] [--destination_root <dir>] [--password <pwd>]
+```
+
+Importa todos los archivos de **código** (`.bas/.cls/.frm`) desde `src/` hacia la BD — excluye `.form.txt`.
+
+---
+
+### `import-form-all` — Importar todos los formularios
+
+```powershell
+node cli.js import-form-all [--access <ruta>] [--destination_root <dir>] [--password <pwd>]
+```
+
+Importa todos los **formularios** (`.form.txt`) desde `src/` hacia la BD.
+
+---
+
+### `sync <Mod...>` — Alias de import (código)
+
+```powershell
+node cli.js sync Utilidades Validaciones
+```
+
+Alias de `import`, mantenido por compatibilidad.
+
+---
+
+### `fix-encoding` — Corregir encoding
+
+```powershell
+node cli.js fix-encoding [<Mod...>] [--access <ruta>] [--location Both|Src|Access] [--password <pwd>]
+```
+
+Corrige archivos con BOM UTF-8 u otros problemas de encoding. Sin módulos procesa todos; con módulos solo los indicados.
+
+**`--location`** controla dónde se aplica:
+
+| Valor | Efecto |
+|---|---|
+| `Both` (default) | Corrige en `src/` y en la BD |
+| `Src` | Solo corrige los archivos en `src/` |
+| `Access` | Solo reimporta desde `src/` para corregir en la BD |
+
+---
+
+### `generate-erd` — Generar documentación de tablas
+
+```powershell
+node cli.js generate-erd [--backend <ruta>] [--erd_path <dir>] [--password <pwd>]
+```
+
+Extrae la estructura de tablas, campos, tipos, claves primarias y relaciones del backend a un archivo Markdown. Autodetecta `*_Datos.accdb` en el directorio actual si no se especifica `--backend`.
+
+El archivo generado se nombra igual que el backend: `NombreBackend.md` dentro de `--erd_path` (default: `docs/ERD/`).
+
+---
+
+### `status` — Estado de la sesión
 
 ```powershell
 node cli.js status
 ```
 
-Muestra el estado actual de la sesión.
+Muestra el estado de la sesión activa: BD, rutas, módulos tocados, pendientes y último sync.
 
-### Finalizar Sesión
+---
+
+### `end` — Cerrar sesión
 
 ```powershell
-node cli.js end
+node cli.js end [--auto_export_on_end false]
 ```
 
-Cierra la sesión y restaura cualquier configuración de Access modificada.
+Para el watcher si está activo, importa pendientes, realiza el export final (configurable) y restaura la configuración de Access (StartupForm, AutoExec, AllowBypassKey).
 
-**Flags disponibles:**
-- `--auto_export_on_end false` - Desactivar export final
+---
 
-## Configuración de Acceso
+## Flags globales
 
-El skill maneja automáticamente:
+| Flag | Descripción | Default |
+|---|---|---|
+| `--access <ruta>` | Ruta a la BD (.accdb/.accde/.mdb/.mde) | Autodetecta en CWD |
+| `--password <pwd>` | Contraseña de la BD si está protegida | — |
+| `--destination_root <dir>` | Carpeta de trabajo (export/import) | `src` |
+| `--debounce_ms <n>` | Espera en ms antes de importar en watch | `600` |
+| `--location Both\|Src\|Access` | Ámbito de fix-encoding | `Both` |
+| `--backend <ruta>` | Backend para generate-erd | Autodetecta `*_Datos.accdb` |
+| `--erd_path <dir>` | Carpeta de salida para el ERD | `docs/ERD` |
+| `--auto_export_on_end false` | Desactiva export final al cerrar | `true` |
 
-- **StartupForm**: Deshabilita el formulario de inicio antes de abrir
-- **AutoExec**: Renombra temporalmente macros AutoExec para evitar ejecución
-- **AllowBypassKey**: Asegura acceso completo a la base de datos
+---
 
-Al cerrar, restaura automáticamente todos estos valores.
+## Comportamiento interno
 
-## Integración con Trae
+El skill gestiona automáticamente antes de abrir la BD:
 
-Este skill está diseñado para funcionar como parte del framework VBA-SDD. Para desplegar en un nuevo proyecto:
+- **StartupForm**: lo deshabilita temporalmente para evitar que arranque el formulario de inicio
+- **AutoExec**: renombra la macro para evitar su ejecución
+- **AllowBypassKey**: asegura acceso completo
+
+Al cerrar la sesión restaura todos estos valores al estado original.
+
+Access se abre en modo headless (`Visible=false`, `UserControl=false`) — no aparece ninguna ventana ni diálogo. **La BD debe estar cerrada antes de ejecutar cualquier comando.**
+
+---
+
+## Integración con el framework VBA-SDD
+
+Para desplegar el skill en un nuevo proyecto:
 
 ```powershell
 .\deploy.ps1
 ```
 
-Esto copiará el skill, generará la estructura inicial y exportará el código VBA automáticamente.
+Esto copia el skill, genera la estructura inicial y exporta el código VBA automáticamente.
+
+---
+
+## Flujo de trabajo típico
+
+```powershell
+# 1. Inicio de sesión — snapshot inicial
+node cli.js start
+
+# 2. (Opcional) Generar contexto de datos para la IA
+node cli.js generate-erd
+
+# 3a. Modo automático: la IA edita src/ y los cambios se importan solos
+node cli.js watch
+
+# 3b. Modo manual código: importar solo módulos de código (.bas/.cls)
+node cli.js import ModuloDAO Utilidades
+
+# 3c. Modo manual UI: importar solo formularios (.form.txt)
+node cli.js import-form Form_FormGestion Form_FormBusqueda
+
+# 4. Compilar en Access
+# Abre Access → VBE → Debug → Compile
+
+# 5. Cerrar sesión
+node cli.js end
+```
+
+---
 
 ## Resolución de Problemas
 
 ### Access se abre visiblemente
-- Verifica que no hay procesos de Access zombis: `Get-Process MSACCESS | Stop-Process`
-- El skill debería ejecutarse con `Visible = false`
+Hay una instancia previa de Access en ejecución. Ciérrala antes:
+```powershell
+Get-Process MSACCESS | Stop-Process -Force
+```
 
-### Error al exportar formulario
-- Algunos formularios con código complejo pueden fallar por errores COM
-- El export continuará con los siguientes módulos
+### Error "archivo en uso" o "locked"
+La BD está abierta en otro proceso. Cierra Access completamente antes de ejecutar el skill.
+
+### Los formularios se exportan sin la UI (solo código)
+El export de formularios usa `SaveAsText` que requiere que el objeto Access sea accesible. Si falla, revisa que la BD no esté bloqueada y que `--access` apunte al frontend correcto.
+
+### Encoding incorrecto en tildes o caracteres especiales
+```powershell
+node cli.js fix-encoding --location Both
+```
 
 ### La BD tiene contraseña
-- Pasa la contraseña con: `--password "micontraseña"`
-
-## Licencia
-
-Uso interno - Framework VBA-SDD
+Pasa siempre `--password "micontraseña"` en todos los comandos.
