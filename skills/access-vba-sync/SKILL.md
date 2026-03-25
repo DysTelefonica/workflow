@@ -1,54 +1,84 @@
-# SKILL.md — Skill para workflow Access/VBA
+# SKILL.md — access-vba-sync
 
 ## Objetivo
 
-Automatizar el workflow de desarrollo entre código VBA de Microsoft Access y archivos de texto en disco, permitiendo que una IA (o un desarrollador) edite el código fuentes y lo sincronice con la BD.
+Sincronización bidireccional entre código VBA de Microsoft Access y archivos de texto en `src/`. Permite que una IA o un desarrollador edite archivos `.bas`, `.cls` y `.form.txt` y los importe a la BD, o exporte desde la BD para editarlos.
 
 ---
 
-## ⚠️ REGLA CRÍTICA: IMPORTACIÓN DIFERENCIADA POR TIPO DE CAMBIO
+## 🚨 REGLAS ABSOLUTAS (leer ANTES de ejecutar nada)
 
-| Tipo de cambio | Archivos a importar | Comando |
-|----------------|---------------------|---------|
-| **Código VBA de formulario** (sin UI) | Solo `.cls` | `node cli.js import Form_Nombre [Form_Otro ...]` |
-| **UI de formulario** (controles, layout, propiedades) | `.cls` + `.form.txt` | `node cli.js import-form Form_Nombre [Form_Otro ...]` |
-| **Módulo .bas o clase .cls** | Solo el archivo | `node cli.js import NombreModulo [Modulo2 ...]` |
+### 1. SIEMPRE usar el CLI — NUNCA llamar al PS1 directamente
 
-> **Se pueden pasar VARIOS formularios o módulos a la vez** — el CLI los procesa todos en una sola ejecución.
+```powershell
+# ✅ CORRECTO
+node cli.js import MiModulo
 
-**¿Por qué esta distinción?**
-- `import` → solo código VBA (`.cls` de formulario o `.bas`/`.cls` normal)
-- `import-form` → toda la UI del formulario (`.form.txt`) + código
+# ❌ PROHIBIDO
+.\VBAManager.ps1 -Action Import ...
+powershell.exe -File VBAManager.ps1 ...
+```
 
-**Si importás `.form.txt` cuando no tocaste la UI, podés perder cambios de layout hechos en Access.**
+### 2. NUNCA ejecutar PowerShell suelto para verificar Access
+
+El CLI gestiona Access internamente. Ejecutar `Get-Process` con `$_` desde shells no-PowerShell (Git Bash, WSL, terminal de Trae/OpenCode) causa bucles infinitos por interpolación de `$_` como variable bash.
+
+```powershell
+# ❌ PROHIBIDO — causa error /usr/bin/bash.ProcessName en bucle
+Get-Process | Where-Object { $_.ProcessName -like '*ACCESS*' }
+
+# ✅ Si realmente necesitas matar Access (tras un fallo), UNA sola vez:
+powershell.exe -NoProfile -NonInteractive -Command 'Get-Process MSACCESS -ErrorAction SilentlyContinue | Stop-Process -Force'
+```
+
+### 3. UN comando a la vez, ESPERAR a que termine
+
+Cada `node cli.js <comando>` abre Access COM headless, opera, y cierra. Tiene timeout de 5 minutos.
+
+```powershell
+# ✅ Secuencial — esperar a que termine cada uno
+node cli.js import ModuloA
+node cli.js import ModuloB
+
+# ❌ NUNCA en paralelo
+node cli.js import ModuloA & node cli.js import ModuloB
+```
+
+Se pueden importar **varios módulos en un solo comando** (preferible):
+
+```powershell
+node cli.js import ModuloA ModuloB ModuloC
+```
+
+### 4. Encoding: archivos en `src/` son UTF-8 sin BOM
+
+Al escribir o editar archivos en `src/`, guardar **siempre como UTF-8 sin BOM**. El CLI convierte automáticamente a ANSI (Windows-1252) al importar a Access, y de ANSI a UTF-8 al exportar. Los caracteres españoles (tildes, eñes, etc.) se preservan correctamente si se respeta esta regla.
+
+Si ves caracteres corruptos (`S?` en vez de `Sí`):
+
+```powershell
+node cli.js fix-encoding --location Both
+```
+
+### 5. La BD debe estar CERRADA antes de cualquier comando
+
+Si Access tiene la BD abierta, el CLI fallará. Cerrar Access antes de operar.
 
 ---
 
-## ⚠️ REGLA DE ORO: SIEMPRE USAR EL CLI
+## Importación diferenciada por tipo de cambio
 
-**NUNCA llamar directamente al `VBAManager.ps1`.** 
+| Qué cambié | Comando | Qué importa |
+|------------|---------|-------------|
+| Código VBA de formulario (sin tocar UI) | `node cli.js import Form_X` | Solo `.cls` |
+| UI de formulario (controles, layout) | `node cli.js import-form Form_X` | `.form.txt` (UI + código) |
+| Módulo `.bas` o clase `.cls` | `node cli.js import MiModulo` | El archivo `.bas`/`.cls` |
 
-Usar SIEMPRE el `cli.js` como interfaz:
-
-```powershell
-node cli.js <comando>
-```
-
-El CLI maneja correctamente el directorio de trabajo (`cwd`), la resolución de rutas y los parámetros.
-
-**❌ MAL (no usar):**
-```powershell
-.\VBAManager.ps1 -Action Export ...
-```
-
-**✅ BIEN (siempre así):**
-```powershell
-node cli.js export MiModulo
-```
+**Regla clave:** si solo cambiaste código VBA de un formulario, usar `import` (no `import-form`). Usar `import-form` reimporta toda la UI y puede pisar cambios de layout hechos en Access.
 
 ---
 
-## Estructura de archivos exportados
+## Estructura de `src/`
 
 ```
 src/
@@ -56,237 +86,195 @@ src/
 │   └── MiModulo.bas
 ├── classes/                    # Clases VBA (.cls)
 │   └── CUsuario.cls
-└── forms/                     # Formularios Access (DOS archivos por formulario)
-    ├── Form_MiForm.form.txt   # UI + código completo (SaveAsText)
+└── forms/                     # Formularios (DOS archivos por formulario)
+    ├── Form_MiForm.form.txt   # UI completa + código (SaveAsText)
     └── Form_MiForm.cls        # Solo código VBA (para diff y edición)
 ```
 
-**Importante:** Cada formulario genera DOS archivos:
-- `.form.txt` → contiene UI (controles, propiedades) + código VBA
-- `.cls` → contiene SOLO el código VBA
-
 ---
 
-## Comandos esenciales (con ejemplos)
+## Comandos
 
-### Exportar módulos
+### Exportar
 
 ```powershell
-# Exportar UN módulo específico (código .bas o .cls)
-node cli.js export MiModulo
-
-# Exportar VARIOS módulos a la vez
-node cli.js export ModuloA ModuloB ModuloC
-
-# Exportar un formulario (genera .form.txt + .cls)
-node cli.js export-form Form_MiFormulario
-
-# Exportar VARIOS formularios a la vez
-node cli.js export-form Form_FormGestion Form_FormDetalle Form_FormNC
-
-# Exportar TODOS los módulos (start de sesión)
-node cli.js start
-
-# Exportar todo sin iniciar sesión
-node cli.js export-all
+node cli.js export MiModulo                    # Un módulo (.bas/.cls)
+node cli.js export ModA ModB ModC              # Varios módulos
+node cli.js export-form Form_MiForm            # Un formulario (.form.txt + .cls)
+node cli.js export-form Form_A Form_B Form_C   # Varios formularios
+node cli.js export-all                         # Todos los módulos
+node cli.js start                              # Export-all + inicia sesión
 ```
 
-### Importar módulos (código)
+### Importar código (`.bas`/`.cls` — NO toca `.form.txt`)
 
 ```powershell
-# Importar código (.bas/.cls) de UN módulo — NO toca .form.txt
-node cli.js import MiModulo
-
-# Importar VARIOS módulos de código a la vez
-node cli.js import ModuloA ModuloB ModuloC
-
-# Importar código de UN formulario (.cls) — NO toca .form.txt
-# Usa esto cuando solo cambiaste código VBA del formulario, NO la UI
-node cli.js import Form_MiFormulario
-
-# Importar código de VARIOS formularios a la vez
-node cli.js import Form_MiFormulario Form_OtroFormulario
-
-# Importar TODOS los módulos de código (no formularios)
-node cli.js import-all
+node cli.js import MiModulo                    # Un módulo
+node cli.js import ModA ModB ModC              # Varios módulos
+node cli.js import Form_MiForm                 # Código de formulario (solo .cls)
+node cli.js import Form_A Form_B               # Código de varios formularios
+node cli.js import-all                         # Todos los .bas/.cls de src/
 ```
 
-### Importar formularios (UI + código)
+### Importar formularios (`.form.txt` — UI + código)
 
 ```powershell
-# Importar formulario completo (.form.txt) — UI + código VBA
-# Usa esto cuando cambiaste controles, propiedades, o addediste/removiste controles
-node cli.js import-form Form_MiFormulario
-
-# Importar VARIOS formularios completos a la vez
-node cli.js import-form Form_FormGestion Form_FormDetalle Form_FormNC
-
-# Importar TODOS los formularios
-node cli.js import-form-all
+node cli.js import-form Form_MiForm            # Un formulario completo
+node cli.js import-form Form_A Form_B Form_C   # Varios formularios
+node cli.js import-form-all                    # Todos los .form.txt de src/
 ```
 
----
-
-## 🔑 CUANDO CAMBIAS CÓDIGO VBA DE UN FORMULARIO
-
-Si solo editás el código VBA de un formulario (sin tocar UI):
+### Eliminar módulos de la BD
 
 ```powershell
-# 1. Exportás el formulario para tener la versión actualizada
-node cli.js export-form Form_MiFormulario
-
-# 2. Editás el .cls (código VBA)
-#    src/forms/Form_MiFormulario.cls
-
-# 3. Importás SOLO el código (NO la UI)
-node cli.js import Form_MiFormulario
+node cli.js delete-module MiModulo             # Elimina de la BD (NO de src/)
+node cli.js delete-module ModA ModB            # Varios a la vez
 ```
 
-**❌ NO hacer:** `import-form` → esto reimporta la UI completa y puede perder cambios de layout hechos en Access.
-
----
-
-## 🔑 CUANDO CAMBIAS LA UI DE UN FORMULARIO
-
-Si agregaste/removiste controles, cambiaste propiedades de controles, o modificaste el layout:
+### Utilidades
 
 ```powershell
-# 1. Exportás el formulario (para tener base .form.txt limpia)
-node cli.js export-form Form_MiFormulario
-
-# 2. Editás el .form.txt (UI + código)
-#    src/forms/Form_MiFormulario.form.txt
-
-# 3. Importás el formulario completo (UI + código)
-node cli.js import-form Form_MiFormulario
+node cli.js fix-encoding                       # Corrige encoding en src/ y BD
+node cli.js fix-encoding --location Src        # Solo archivos en src/
+node cli.js fix-encoding --location Access     # Solo en la BD
+node cli.js fix-encoding ModA ModB             # Solo módulos específicos
+node cli.js generate-erd                       # Genera docs/ERD/NombreBackend.md
+node cli.js generate-erd --backend "X.accdb"   # Backend específico
+node cli.js status                             # Estado de sesión
+node cli.js end                                # Cierra sesión (export final)
+node cli.js end --auto_export_on_end false      # Sin export final
+node cli.js watch                              # Auto-sync al guardar archivos
 ```
 
 ---
 
 ## Workflow típico con IA
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│ 1. INICIO: Exportar módulo a modificar                          │
-│    node cli.js export-form Form_NCProyecto                      │
-│    (o node cli.js export MiModulo si es un .bas)                │
-└────────────────────────┬────────────────────────────────────────┘
-                         ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ 2. IA EDITORIAL: Modifica los archivos en src/                  │
-│    - Código VBA → editar .cls (formularios) o .bas (módulos)   │
-│    - UI formularios → editar .form.txt                          │
-└────────────────────────┬────────────────────────────────────────┘
-                         ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ 3. SINCRONIZAR: Importar cambios a Access                       │
-│                                                                 │
-│    Si solo cambiaste CÓDIGO de formulario:                      │
-│    → node cli.js import Form_NCProyecto                         │
-│                                                                 │
-│    Si cambiaste UI de formulario:                               │
-│    → node cli.js import-form Form_NCProyecto                    │
-│                                                                 │
-│    Si cambiaste módulos/clases:                                 │
-│    → node cli.js import MiModulo                                │
-└────────────────────────┬────────────────────────────────────────┘
-                         ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ 4. COMPILAR: Abrir Access → VBE → Debug → Compile              │
-│    (Obligatorio tras cada importación)                          │
-└────────────────────────┬────────────────────────────────────────┘
-                         ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ 5. PROBAR: Validar que los cambios funcionan en Access          │
-└─────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## Mode Watch (automático)
-
-El modo watch detecta cambios en archivos y los importa automáticamente:
+### Cambiar código VBA de un formulario
 
 ```powershell
-node cli.js watch
+# 1. Exportar para tener versión actualizada
+node cli.js export-form Form_MiForm
+
+# 2. Editar src/forms/Form_MiForm.cls (solo código)
+
+# 3. Importar SOLO código — NO la UI
+node cli.js import Form_MiForm
 ```
 
-A partir de entonces:
-- Guardás un `.bas` → se importa automáticamente
-- Guardás un `.cls` de formulario → se importa automáticamente como código
-- Guardás un `.form.txt` → se importa automáticamente como formulario
-
----
-
-## Sesión y estado
-
-El skill mantiene estado en `.access-vba-skill/session.json`:
+### Cambiar la UI de un formulario
 
 ```powershell
-node cli.js status    # Ver estado actual
-node cli.js end       # Cerrar sesión (export final opcional)
+# 1. Exportar para tener .form.txt limpio
+node cli.js export-form Form_MiForm
+
+# 2. Editar src/forms/Form_MiForm.form.txt (UI + código)
+
+# 3. Importar formulario completo
+node cli.js import-form Form_MiForm
 ```
 
----
-
-## Generar documentación ERD
+### Cambiar módulos/clases
 
 ```powershell
-# Genera docs/ERD/NombreBackend.md
-node cli.js generate-erd
+# 1. Exportar
+node cli.js export MiModulo
 
-# Con backend específico
-node cli.js generate-erd --backend "MiBackend.accdb" --erd_path "docs/ERD"
+# 2. Editar src/modules/MiModulo.bas o src/classes/MiClase.cls
+
+# 3. Importar
+node cli.js import MiModulo
 ```
+
+### Tras cada importación
+
+Abrir Access → VBE → Debug → Compile. Obligatorio para validar.
 
 ---
 
-## Flags disponibles
+## Flags
 
 | Flag | Descripción | Default |
 |------|-------------|---------|
-| `--access <ruta>` | Ruta a la BD (.accdb) | Autodetecta en CWD |
+| `--access <ruta>` | Ruta a la BD (.accdb/.mdb) | Autodetecta en CWD |
 | `--password <pwd>` | Contraseña de la BD | — |
 | `--destination_root <dir>` | Carpeta de trabajo | `src` |
-| `--debounce_ms <n>` | Ms espera antes de importar en watch | `600` |
+| `--debounce_ms <n>` | Debounce en ms para watch | `600` |
+| `--location Both\|Src\|Access` | Ámbito de fix-encoding | `Both` |
+| `--backend <ruta>` | Backend para generate-erd | Autodetecta `*_Datos.accdb` |
+| `--erd_path <dir>` | Carpeta de salida ERD | `docs/ERD` |
+| `--auto_export_on_end false` | Desactiva export al cerrar | `true` |
 
 ---
 
-## Requisitos
+## Protocolo de recuperación ante fallos
 
-- **Windows** con Microsoft Access instalado
-- **La BD debe estar cerrada** antes de ejecutar cualquier comando
-- El `cli.js` usa `cwd` del proceso Node → ejecutar desde la raíz del proyecto
-
----
-
-## Resolución de problemas
-
-### "Access está bloqueado"
-La BD está abierta en Access. Cerrarla antes de usar el skill.
+### El comando falló con error
 
 ```powershell
-Get-Process MSACCESS | Stop-Process -Force
+# 1. Matar Access si quedó abierto
+powershell.exe -NoProfile -NonInteractive -Command 'Get-Process MSACCESS -ErrorAction SilentlyContinue | Stop-Process -Force'
+
+# 2. Esperar a que se libere el lock
+Start-Sleep -Seconds 2
+
+# 3. Reintentar
+node cli.js import MiModulo
 ```
 
-### "Módulo no encontrado"
-- Verificar que el nombre del módulo sea exacto (incluir prefijo `Form_` para formularios)
-- Usar `node cli.js status` para ver módulos disponibles
+### El comando se cuelga (más de 2 minutos sin output)
 
-### "Subíndice fuera del intervalo"
-- Para formularios, usar el nombre con prefijo `Form_`: `Form_MiFormulario`, no `MiFormulario`
+El timeout automático (5 min) lo matará. Si necesitas intervenir antes:
+
+```powershell
+# 1. Ctrl+C en la terminal (o matar el proceso node)
+
+# 2. Matar Access huérfano
+powershell.exe -NoProfile -NonInteractive -Command 'Get-Process MSACCESS -ErrorAction SilentlyContinue | Stop-Process -Force'
+
+# 3. Esperar y reintentar
+Start-Sleep -Seconds 2
+node cli.js import MiModulo
+```
+
+### Error "UnauthorizedAccess" / "AuthorizationManager"
+
+Si aparece un error de `ExecutionPolicy`, es un problema de GPO. El CLI ya usa `-ExecutionPolicy Bypass` con `-Command` para evitarlo. Si persiste, ejecutar manualmente:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
+```
+
+Y luego hacer `Unblock-File` sobre el `.ps1`:
+
+```powershell
+Unblock-File -Path ".agents\skills\access-vba-sync\VBAManager.ps1"
+```
+
+### Caracteres corruptos (tildes, eñes)
+
+```powershell
+node cli.js fix-encoding --location Both
+```
+
+### "Módulo no encontrado" / "Subíndice fuera del intervalo"
+
+Para formularios, siempre usar el nombre con prefijo `Form_`: `Form_MiFormulario`, no `MiFormulario`.
 
 ---
 
 ## Resumen rápido
 
-| Qué necesito | Comando | ¿Qué importa? |
-|--------------|---------|---------------|
-| Exportar módulo(s) | `node cli.js export ModA ModB` | `.bas` o `.cls` |
-| Exportar formulario(s) | `node cli.js export-form Form_A Form_B` | `.form.txt` + `.cls` |
-| Importar código VBA (formulario) | `node cli.js import Form_A Form_B` | **Solo `.cls`** |
-| Importar UI formulario(s) | `node cli.js import-form Form_A Form_B` | **`.form.txt` + `.cls`** |
-| Importar módulo/clase(s) | `node cli.js import ModA ModB` | `.bas` o `.cls` |
-| Sincronización automática | `node cli.js watch` | Auto-detecta tipo |
-| Estado de sesión | `node cli.js status` | — |
-| Cerrar sesión | `node cli.js end` | — |
+| Necesito | Comando |
+|----------|---------|
+| Exportar módulo(s) | `node cli.js export ModA ModB` |
+| Exportar formulario(s) | `node cli.js export-form Form_A Form_B` |
+| Importar código (formulario) | `node cli.js import Form_A Form_B` |
+| Importar UI formulario(s) | `node cli.js import-form Form_A Form_B` |
+| Importar módulo/clase(s) | `node cli.js import ModA ModB` |
+| Eliminar módulo(s) de la BD | `node cli.js delete-module ModA ModB` |
+| Corregir encoding | `node cli.js fix-encoding` |
+| Generar ERD | `node cli.js generate-erd` |
+| Auto-sync | `node cli.js watch` |
+| Estado | `node cli.js status` |
+| Cerrar sesión | `node cli.js end` |

@@ -2,7 +2,7 @@
 [CmdletBinding()]
 Param(
     [Parameter(Mandatory = $true, Position = 0)]
-    [ValidateSet("Export", "Import", "Fix-Encoding", "Generate-ERD", "Delete")]
+    [ValidateSet("Export", "Import", "Fix-Encoding", "Generate-ERD")]
     [string]$Action,
 
     [Parameter()]
@@ -31,16 +31,8 @@ Param(
     [string]$ErdPath,
 
     [Parameter()]
-    [string]$ModuleNameJson,  # JSON array string desde handler.js
-
-    [Parameter()]
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSAvoidUsingPlainTextForPassword", "Password", Justification = "Requerido por especificacion del proyecto.")]
-    [string]$Password = "",
-
-    # Para acciones Import: controla busqueda de Resolve-ImportFileForModule
-    # $true = solo .form.txt (formularios), $false = excluye .form.txt (codigo)
-    # Sin especificar = usa busqueda sin filtro (comportamiento original)
-    [switch]$FormOnly
+    [string]$Password = "dpddpd"
 )
 
 $ErrorActionPreference = "Stop"
@@ -327,7 +319,7 @@ function Resolve-AccessPath {
     )
 
     if (-not [string]::IsNullOrWhiteSpace($AccessPath)) {
-        return (Resolve-Path -LiteralPath $AccessPath).Path
+        return (Resolve-Path -Path $AccessPath).Path
     }
 
     $candidates = Get-ChildItem -Path (Get-Location) -File -ErrorAction SilentlyContinue |
@@ -356,11 +348,11 @@ function Resolve-DestinationRoot {
         $DestinationRoot = Join-Path -Path (Get-Location) -ChildPath "src"
     }
 
-    if (-not (Test-Path -LiteralPath $DestinationRoot)) {
+    if (-not (Test-Path -Path $DestinationRoot)) {
         New-Item -Path $DestinationRoot -ItemType Directory -Force | Out-Null
     }
 
-    return (Resolve-Path -LiteralPath $DestinationRoot).Path
+    return (Resolve-Path -Path $DestinationRoot).Path
 }
 
 function Resolve-ModulesPath {
@@ -368,9 +360,9 @@ function Resolve-ModulesPath {
     Param(
         [Parameter(Mandatory = $true)][string]$DestinationRoot,
         [Parameter(Mandatory = $true)][string]$AccessPath,
-        [Parameter(Mandatory = $true)][ValidateSet("Export", "Import", "Fix-Encoding", "Generate-ERD", "Delete")][string]$Action
+        [Parameter(Mandatory = $true)][ValidateSet("Export", "Import", "Fix-Encoding", "Generate-ERD")][string]$Action
     )
-    if (-not (Test-Path -LiteralPath $DestinationRoot)) {
+    if (-not (Test-Path -Path $DestinationRoot)) {
         if ($Action -eq "Export" -or $Action -eq "Fix-Encoding") {
             New-Item -ItemType Directory -Force -Path $DestinationRoot | Out-Null
         } else {
@@ -378,7 +370,7 @@ function Resolve-ModulesPath {
         }
     }
 
-    return (Resolve-Path -LiteralPath $DestinationRoot).Path
+    return (Resolve-Path -Path $DestinationRoot).Path
 }
 
 function Get-FileEncodingInfo {
@@ -560,35 +552,24 @@ function Close-AccessDatabase {
     $startupInfo = $Session.StartupInfo
     $accessPid = $Session.ProcessId
 
-    # 1. Liberar referencias COM del VBE (antes de cerrar la BD)
-    foreach ($obj in @($Session.VbProject, $Session.Vbe)) {
-        if ($obj) { try { [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($obj) | Out-Null } catch {} }
-    }
-
-    # 2. Cerrar la BD en Access (libera el lock del archivo)
     if ($access) {
         try { $access.CloseCurrentDatabase() } catch {}
         try { $access.Quit() } catch {}
-        try { [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($access) | Out-Null } catch {}
     }
 
-    # 3. GC para liberar COM
+    foreach ($obj in @($Session.VbProject, $Session.Vbe, $Session.AccessApplication)) {
+        if ($obj) { try { [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($obj) | Out-Null } catch {} }
+    }
+
+    try { Restore-AllowBypassKey -AccessPath $AccessPath -Password $Password -OriginalState $orig } catch {}
+    try { Restore-StartupFeatures -AccessPath $AccessPath -Password $Password -RestoreInfo $startupInfo } catch {}
+
     [System.GC]::Collect()
     [System.GC]::WaitForPendingFinalizers()
 
-    # 4. Kill forzoso si sigue vivo (antes de restaurar propiedades)
     if ($accessPid) {
-        Start-Sleep -Milliseconds 500
-        try {
-            $proc = Get-Process -Id $accessPid -ErrorAction SilentlyContinue
-            if ($proc) { Stop-Process -Id $accessPid -Force -ErrorAction SilentlyContinue }
-        } catch {}
-        Start-Sleep -Milliseconds 300
+        try { Stop-Process -Id $accessPid -Force -ErrorAction SilentlyContinue } catch {}
     }
-
-    # 5. Restaurar propiedades de la BD (ahora que Access ya no la tiene abierta)
-    try { Restore-AllowBypassKey -AccessPath $AccessPath -Password $Password -OriginalState $orig } catch {}
-    try { Restore-StartupFeatures -AccessPath $AccessPath -Password $Password -RestoreInfo $startupInfo } catch {}
 }
 
 function Get-ComponentFolder {
@@ -663,20 +644,14 @@ function Export-VbaModule {
             } else {
                 $component.Export($tmp)
             }
-            # .form.txt mantiene todo (UI + código tal cual) — no se limpia
             Convert-AnsiToUtf8NoBom -InputPath $tmp -OutputPath $finalPath
         } else {
             $tmp = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("VBAManager_export_{0}{1}" -f @([guid]::NewGuid().ToString("N"), $ext))
             $component.Export($tmp)
-            # Strip-VbaMetadata elimina metadata antes de Option Compare y después de End*
-            # $component.Export() genera ANSI (1252) — leer con ese encoding
-            $ansiEnc = [System.Text.Encoding]::GetEncoding(1252)
-            $cleanCode = Strip-VbaMetadata -Path $tmp -FileEncoding $ansiEnc
-            Write-Utf8NoBom -Path $finalPath -Text $cleanCode
+            Convert-AnsiToUtf8NoBom -InputPath $tmp -OutputPath $finalPath
         }
 
         # Exportar tambien el codigo VBA como .cls para formularios (para diff y lectura rapida)
-        # Este .cls SI lleva limpieza de metadata
         if ($ModuleName -match "^Form_|^frm") {
             $clsFolder = Join-Path -Path $ModulesPath -ChildPath "forms"
             if (-not (Test-Path -Path $clsFolder)) {
@@ -686,12 +661,7 @@ function Export-VbaModule {
             $codeModule = $component.CodeModule
             if ($codeModule -and $codeModule.CountOfLines -gt 0) {
                 $codeLines = $codeModule.Lines(1, $codeModule.CountOfLines)
-                # Guardar en temp y limpiar metadata
-                $tmpCls = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("VBAManager_export_{0}.cls" -f [guid]::NewGuid().ToString("N"))
-                [System.IO.File]::WriteAllText($tmpCls, $codeLines, [System.Text.Encoding]::UTF8)
-                $cleanCode = Strip-VbaMetadata -Path $tmpCls -FileEncoding ([System.Text.Encoding]::UTF8)
-                Write-Utf8NoBom -Path $clsPath -Text $cleanCode
-                Remove-Item -Path $tmpCls -Force -ErrorAction SilentlyContinue
+                Write-Utf8NoBom -Path $clsPath -Text $codeLines
             }
         }
     } finally {
@@ -704,21 +674,14 @@ function Resolve-ImportFileForModule {
     [CmdletBinding()]
     Param(
         [Parameter(Mandatory = $true)][string]$ModulesPath,
-        [Parameter(Mandatory = $true)][string]$ModuleName,
-        [switch]$FormOnly   # Si $true: solo .form.txt. Si $false: excluye .form.txt. Default (sin param): todos.
+        [Parameter(Mandatory = $true)][string]$ModuleName
     )
 
     $modulesPathText = [string]$ModulesPath
     $moduleNameText = [string]$ModuleName
 
-    # Secuencia de búsqueda según tipo
-    if ($FormOnly) {
-        $subFolders = @("forms", "")
-        $extensions = @(".form.txt")
-    } else {
-        $subFolders = @("forms", "classes", "modules", "")
-        $extensions = @(".bas", ".cls", ".frm")
-    }
+    $subFolders = @("forms", "classes", "modules", "")
+    $extensions = @(".form.txt", ".frm", ".cls", ".bas")
 
     foreach ($folder in $subFolders) {
         $searchPath = if ($folder) { Join-Path -Path $modulesPathText -ChildPath $folder } else { $modulesPathText }
@@ -730,18 +693,10 @@ function Resolve-ImportFileForModule {
         }
     }
 
-    # Fallback recursivo sin prefijo de carpeta
-    if ($FormOnly) {
-        $any = Get-ChildItem -Path $modulesPathText -File -Recurse -Include "*.form.txt" -ErrorAction SilentlyContinue |
-            Where-Object { $_.BaseName -ieq $moduleNameText -or ($_.Name -replace '\.form\.txt$', '') -ieq $moduleNameText } |
-            Sort-Object -Property @{ Expression = { if ($_.Name -match '\.form\.txt$') { 0 } else { 1 } } } |
-            Select-Object -First 1
-    } else {
-        $any = Get-ChildItem -Path $modulesPathText -File -Recurse -Include "*.bas", "*.cls", "*.frm" -ErrorAction SilentlyContinue |
-            Where-Object { $_.BaseName -ieq $moduleNameText -or ($_.Name -replace '\.form\.txt$', '') -ieq $moduleNameText } |
-            Sort-Object -Property @{ Expression = { if ($_.Extension -eq '.cls') { 0 } elseif ($_.Extension -eq '.frm') { 1 } else { 2 } } } |
-            Select-Object -First 1
-    }
+    $any = Get-ChildItem -Path $modulesPathText -File -Recurse -Include "*.bas", "*.cls", "*.frm", "*.form.txt" -ErrorAction SilentlyContinue |
+        Where-Object { $_.BaseName -ieq $moduleNameText -or ($_.Name -replace '\.form\.txt$', '') -ieq $moduleNameText } |
+        Sort-Object -Property @{ Expression = { if ($_.Name -match '\.form\.txt$') { 0 } elseif ($_.Extension -eq '.frm') { 1 } elseif ($_.Extension -eq '.cls') { 2 } else { 3 } } } |
+        Select-Object -First 1
 
     if ($any) { return $any.FullName }
     return $null
@@ -774,11 +729,10 @@ function Import-VbaModule {
         [Parameter(Mandatory = $true)]$VbProject,
         [Parameter(Mandatory = $true)][string]$ModuleName,
         [Parameter(Mandatory = $true)][string]$ModulesPath,
-        $AccessApplication = $null,  # necesario para LoadFromText de formularios
-        [switch]$FormOnly  # $true=solo .form.txt, $false=excluye .form.txt
+        $AccessApplication = $null  # FIX: necesario para LoadFromText de formularios
     )
 
-    $src = Resolve-ImportFileForModule -ModulesPath $ModulesPath -ModuleName $ModuleName -FormOnly:$FormOnly
+    $src = Resolve-ImportFileForModule -ModulesPath $ModulesPath -ModuleName $ModuleName
     if (-not $src) { throw ("No se encontro archivo para el modulo '{0}' en {1}" -f $ModuleName, $ModulesPath) }
 
     $isFormTxt = ($src -match '\.form\.txt$')
@@ -790,7 +744,7 @@ function Import-VbaModule {
     try {
         Convert-Utf8ToAnsiTempFile -InputPath $src -TempPath $tmpAnsi
 
-        # formularios usan LoadFromText — nunca VBComponents.Import
+        # FIX: formularios usan LoadFromText — nunca VBComponents.Import
         if ($isFormTxt) {
             if (-not $AccessApplication) { throw "Se necesita -AccessApplication para importar formularios (.form.txt)" }
             $formName = $ModuleName -replace '^Form_', ''
@@ -802,23 +756,12 @@ function Import-VbaModule {
 
         # FIX: modulos y clases — DeleteLines + AddFromFile como primera opcion
         # Evita VBComponents.Remove() que puede disparar dialogo VBE en instancias visibles
-        # Ademas, Strip-VbaMetadata elimina metadata antes de Option Compare y después de End*
         try {
             $component = $VbProject.VBComponents.Item($ModuleName)
             $codeModule = $component.CodeModule
             $count = $codeModule.CountOfLines
             if ($count -gt 0) { $codeModule.DeleteLines(1, $count) }
-            
-            # Limpiar metadata del archivo antes de importar
-            # $tmpAnsi es ANSI (1252) — leer con ese encoding
-            $ansiEnc = [System.Text.Encoding]::GetEncoding(1252)
-            $cleanCode = Strip-VbaMetadata -Path $tmpAnsi -FileEncoding $ansiEnc
-            if (-not [string]::IsNullOrWhiteSpace($cleanCode)) {
-                $cleanTmp = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("VBAManager_clean_{0}.tmp" -f [guid]::NewGuid().ToString("N"))
-                [System.IO.File]::WriteAllText($cleanTmp, $cleanCode, [System.Text.Encoding]::GetEncoding(1252))
-                $codeModule.AddFromFile($cleanTmp)
-                Remove-Item -Path $cleanTmp -Force -ErrorAction SilentlyContinue
-            }
+            $codeModule.AddFromFile($tmpAnsi)
         } catch {
             # El componente no existe aun — importar como nuevo (sin dialogo porque no hay nada que reemplazar)
             $VbProject.VBComponents.Import($tmpAnsi) | Out-Null
@@ -830,96 +773,6 @@ function Import-VbaModule {
             if ($obj) { try { [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($obj) | Out-Null } catch {} }
         }
     }
-}
-
-function Strip-VbaMetadata {
-    <#
-    .SYNOPSIS
-    Extrae solo el código VBA válido de un archivo, removiendo metadata antes de
-    Option Compare/Explicit y después del último End*/Attribute final.
-    #>
-    [CmdletBinding()]
-    Param(
-        [Parameter(Mandatory = $true)][string]$Path,
-        # Encoding con el que leer el archivo. Por defecto auto-detecta:
-        # si tiene BOM UTF-8 → UTF8, si no → Windows-1252 (ANSI).
-        [System.Text.Encoding]$FileEncoding = $null
-    )
-    
-    if (-not $FileEncoding) {
-        $info = Get-FileEncodingInfo -Path $Path
-        if ($info.HasUtf8Bom) {
-            $FileEncoding = [System.Text.Encoding]::UTF8
-        } else {
-            $FileEncoding = [System.Text.Encoding]::GetEncoding(1252)
-        }
-    }
-    
-    $lines = @([System.IO.File]::ReadAllLines($Path, $FileEncoding))
-    if ($lines.Count -eq 0) { return "" }
-    
-    $total = $lines.Count
-    
-    # 1) Encontrar línea de inicio válida: primera línea que NO es Attribute ni vacía
-    # Option Compare/Explicit tienen prioridad, pero cualquier línea no-Attribute es válida
-    # (comentarios, #If, Dim sin espacio, etc.)
-    $startIdx = 0
-    $foundStart = $false
-    for ($i = 0; $i -lt $total; $i++) {
-        $line = $lines[$i].Trim()
-        if ($line -eq "") { continue }
-        if ($line -match '^Attribute\s+') { continue }
-        if ($line -match '^VERSION\s+') { continue }
-        # Primera línea que no es Attribute ni vacía ni VERSION = inicio del código
-        $startIdx = $i
-        $foundStart = $true
-        break
-    }
-    
-    if (-not $foundStart) {
-        # Solo tiene Attributes y líneas vacías — no hay código
-        return ""
-    }
-    
-    # 2) Encontrar línea de fin válida (End Function, End Sub, End Property, End Type, End Enum, End Module, End Class)
-    $endIdx = $total - 1
-    for ($i = $total - 1; $i -ge 0; $i--) {
-        $line = $lines[$i].Trim()
-        if ($line -eq "") { continue }
-        if ($line -match '^Attribute\s+') { continue }
-        if ($line -match '^End\s+(Function|Sub|Property|Type|Enum|Module|Class)$') {
-            $endIdx = $i
-            break
-        }
-        # Última línea con código (por si no tiene End)
-        if ($line -match '\S') {
-            $endIdx = $i
-            break
-        }
-    }
-    
-    # 3) Extraer solo las líneas válidas
-    if ($endIdx -lt $startIdx) {
-        return ($lines | Where-Object { $_.Trim() -ne "" -and $_ -notmatch '^Attribute\s+' }) -join "`n"
-    }
-    
-    $cleanLines = @()
-    for ($i = $startIdx; $i -le $endIdx; $i++) {
-        $cleanLines += $lines[$i]
-    }
-    
-    # 4) Remover líneas Attribute al inicio y fin (por si quedaron)
-    $result = $cleanLines -join "`n"
-    
-    # Limpiar Attribute VB_Name al inicio si quedó
-    $result = $result -replace '(?m)^Attribute\s+VB_Name\s*=.*\r?\n', ''
-    # Limpiar Attribute VB_Name al final si quedó
-    $result = $result -replace '(?m)\r?\nAttribute\s+VB_Name\s*=.*$', ''
-    
-    # Limpiar líneas vacías extras al inicio
-    $result = $result -replace '(?m)^(\r?\n)+', ''
-    
-    return $result.TrimEnd()
 }
 
 function Fix-EncodingInSrc {
@@ -1165,29 +1018,11 @@ try {
         Write-Status -Message ("Accion: {0}" -f $Action) -Color Yellow
     }
 
-    # Normalize ModuleName: puede llegar como:
-    # 1. -ModuleNameJson con JSON array (handler nuevo)
-    # 2. -ModuleName con string separado por comas (legacy)
-    # 3. -ModuleName con array de un elemento conteniendo comas
-    $inputModules = @()
-    if (-not [string]::IsNullOrWhiteSpace($ModuleNameJson)) {
-        try {
-            $inputModules = @((ConvertFrom-Json -InputObject $ModuleNameJson) | Where-Object { $_ })
-        } catch {
-            Write-Status -Message "WARNING: ModuleNameJson parse error: $_" -Color Yellow
-        }
-    }
-    if ($inputModules.Count -eq 0 -and $ModuleName) {
-        if ($ModuleName.Count -eq 1 -and $ModuleName[0] -is [string]) {
-            $first = $ModuleName[0].Trim()
-            if ($first -match ',') {
-                $inputModules = $first -split ',' | ForEach-Object { $_.Trim() }
-            } else {
-                $inputModules = @($first)
-            }
-        } else {
-            $inputModules = @($ModuleName | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-        }
+    # FIX: Normalize ModuleName - handle comma-separated input from handler join
+    # When handler passes "Mod1,Mod2,Mod3" as single string, it becomes String[] with one element
+    $inputModules = $ModuleName
+    if ($inputModules.Count -eq 1 -and $inputModules[0] -is [string] -and $inputModules[0] -match ',') {
+        $inputModules = $inputModules[0] -split ','
     }
     $normalizedModules = @($inputModules | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 
@@ -1230,16 +1065,13 @@ try {
         if ($normalizedModules.Count -gt 0) {
             $targets = $normalizedModules
         } else {
-            # Sin modulos especificados: importar todos los archivos segun el filtro FormOnly
-            if ($FormOnly) {
-                $targets = @(Get-ChildItem -Path $ModulesPath -File -Recurse `
-                    -Include "*.form.txt" -ErrorAction SilentlyContinue |
-                    ForEach-Object { $_.Name -replace '\.form\.txt$', '' } | Sort-Object -Unique)
-            } else {
-                $targets = @(Get-ChildItem -Path $ModulesPath -File -Recurse `
-                    -Include "*.bas", "*.cls", "*.frm" -ErrorAction SilentlyContinue |
-                    ForEach-Object { $_.BaseName } | Sort-Object -Unique)
-            }
+            # FIX: incluir *.form.txt y extraer nombre correctamente
+            $targets = @(Get-ChildItem -Path $ModulesPath -File -Recurse `
+                -Include "*.bas", "*.cls", "*.frm", "*.form.txt" -ErrorAction SilentlyContinue |
+                ForEach-Object {
+                    if ($_.Name -match '\.form\.txt$') { $_.Name -replace '\.form\.txt$', '' }
+                    else { $_.BaseName }
+                } | Sort-Object -Unique)
         }
 
         $total = $targets.Count
@@ -1247,7 +1079,8 @@ try {
         foreach ($name in $targets) {
             $idx++
             Write-Status -Message ("[{0}/{1}] Importando: {2}" -f $idx, $total, $name) -Color Cyan
-            Import-VbaModule -VbProject $vbProject -ModuleName $name -ModulesPath $ModulesPath -AccessApplication $session.AccessApplication -FormOnly:$FormOnly
+            # FIX: pasar AccessApplication para LoadFromText en formularios
+            Import-VbaModule -VbProject $vbProject -ModuleName $name -ModulesPath $ModulesPath -AccessApplication $session.AccessApplication
         }
         Write-Status -Message ("OK Import completado ({0})" -f $total) -Color Green
 
@@ -1288,23 +1121,6 @@ try {
         Export-DataStructure -DatabasePath $BackendPath -OutputPath $mdFile -Password $Password
 
         Write-Status -Message ("OK ERD generado en: {0}" -f $mdFile) -Color Green
-
-    } elseif ($Action -eq "Delete") {
-        # Elimina componentes VBA por nombre (no elimina archivos en src/)
-        if (-not $normalizedModules -or $normalizedModules.Count -eq 0) {
-            throw "Delete requiere -ModuleName con al menos un nombre de modulo"
-        }
-        $session = Open-AccessDatabase -AccessPath $AccessPath -Password $Password
-        $vbProject = $session.VbProject
-
-        $total = $normalizedModules.Count
-        $idx = 0
-        foreach ($name in $normalizedModules) {
-            $idx++
-            Write-Status -Message ("[{0}/{1}] Eliminando: {2}" -f $idx, $total, $name) -Color Cyan
-            Remove-ExistingComponent -VbProject $vbProject -ModuleName $name
-        }
-        Write-Status -Message ("OK Delete completado ({0})" -f $total) -Color Green
 
     } else {
         $fixedSrc = 0
