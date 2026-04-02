@@ -18,18 +18,7 @@ function uniq(arr) {
 }
 
 function powershellExe() {
-  if (process.env.POWERSHELL_EXE) return process.env.POWERSHELL_EXE;
-  // En Windows, usar powershell.exe (siempre disponible)
-  // En entornos no-Windows, esto fallará con un error claro
-  if (process.platform === "win32") {
-    return "powershell.exe";
-  }
-  // Si estamos en WSL/Linux, intentar con pwsh o el path de Windows
-  try {
-    require("child_process").execSync("which pwsh", { stdio: "ignore" });
-    return "pwsh";
-  } catch {}
-  return "powershell.exe";
+  return process.env.POWERSHELL_EXE || "powershell.exe";
 }
 
 function isAccessDbFileName(name) {
@@ -54,8 +43,15 @@ function moduleNameFromFile(filePath) {
   return path.basename(filePath, path.extname(filePath));
 }
 
-function isFormTxtFile(filePath) {
-  return path.basename(filePath).toLowerCase().endsWith(".form.txt");
+// FIX: comparación de rutas robusta en Windows (case-insensitive, normalizada)
+function pathsEqual(a, b) {
+  if (!a || !b) return false;
+  const na = path.resolve(a).replace(/[\\/]+$/, "");
+  const nb = path.resolve(b).replace(/[\\/]+$/, "");
+  if (process.platform === "win32") {
+    return na.toLowerCase() === nb.toLowerCase();
+  }
+  return na === nb;
 }
 
 class AccessVbaSyncSkill {
@@ -82,7 +78,7 @@ class AccessVbaSyncSkill {
     };
 
     this.watcher = null;
-    this.pendingModules = new Map(); // Map<moduleName, "code"|"form">
+    this.pendingModules = new Set();
     this.debounceTimer = null;
     this.importing = false;
     this.fileSignatures = new Map();
@@ -118,10 +114,8 @@ class AccessVbaSyncSkill {
         throw new Error(`--access debe ser .accdb/.accde/.mdb/.mde. Recibido: ${ext || "(sin extensión)"}`);
       }
 
-      if (path.dirname(resolved) !== this.projectRoot) {
-        throw new Error(`La BD debe estar en la raíz del proyecto (CWD). Recibido: ${resolved}`);
-      }
-
+      // FIX: eliminada restricción de que la BD deba estar en CWD.
+      // Se acepta cualquier ruta válida pasada con --access.
       try {
         const st = await fsp.stat(resolved);
         if (!st.isFile()) throw new Error("no es archivo");
@@ -152,87 +146,63 @@ class AccessVbaSyncSkill {
     return path.resolve(this.projectRoot, this.destinationRoot);
   }
 
-  // Resuelve destinationRoot validando que la ruta de sesión exista en esta máquina.
-  // Si la sesión se creó en otra máquina, las rutas absolutas no serán válidas.
-  _safeDestinationRoot() {
-    const fromSession = this.session.destinationRoot;
-    if (fromSession && fs.existsSync(fromSession)) return fromSession;
-    return this.resolveDestinationRoot();
-  }
-
-  // Resuelve accessPath validando que el archivo exista en esta máquina.
-  async _safeAccessPath(accessPath) {
-    const fromSession = this.session.accessPath;
-    if (fromSession && fs.existsSync(fromSession)) return fromSession;
-    return this.detectAccessPath({ accessPath });
-  }
-
   modulesPathFor(accessPath, destinationRootAbs) {
     return destinationRootAbs;
   }
 
-  // Escapa un valor para PowerShell usando comillas simples.
-  // En PS, dentro de comillas simples solo hay que duplicar las comillas simples.
-  _psQuote(val) {
-    const s = String(val);
-    return "'" + s.replace(/'/g, "''") + "'";
-  }
-
-  runVbaManager({ action, accessPath, destinationRootAbs, moduleNames = [], backendPath, erdPath, location, formOnly, timeoutMs }) {
+  runVbaManager({ action, accessPath, destinationRootAbs, moduleNames = [], backendPath, erdPath, location, importMode, newModuleName, deleteFromSrc }) {
     return new Promise((resolve, reject) => {
       const exe = powershellExe();
-
-      // Construir los argumentos para el PS1 usando variables de entorno.
-      // Esto evita todos los problemas de quoting de PowerShell/bash.
-      const env = Object.assign({}, process.env, {
-        _VBA_CWD: this.projectRoot,
-        _VBA_ACTION: action || "",
-        _VBA_ACCESSPATH: accessPath || "",
-        _VBA_DESTROOT: destinationRootAbs || "",
-        _VBA_BACKENDPATH: backendPath || "",
-        _VBA_ERDPATH: erdPath || "",
-        _VBA_LOCATION: location || "",
-        _VBA_FORMONLY: formOnly === true ? "1" : "",
-        _VBA_MODULEJSON: Array.isArray(moduleNames) && moduleNames.length > 0 ? JSON.stringify(moduleNames) : "",
-        _VBA_PASSWORD: this.password || ""
-      });
-
-      // FIX: Leer el PS1 como texto y ejecutarlo con [ScriptBlock]::Create().
-      // Esto bypasea COMPLETAMENTE el AuthorizationManager de ExecutionPolicy.
-      // Set-Location al CWD del proyecto porque PowerShell con -Command NO
-      // hereda el cwd del spawn de forma fiable.
-      const scriptPathEscaped = this.vbaManagerPath.replace(/'/g, "''");
-
-      const lines = [
-        "$ErrorActionPreference = 'Stop'",
-        "Set-Location -LiteralPath $env:_VBA_CWD",
-        `$_code = [System.IO.File]::ReadAllText('${scriptPathEscaped}')`,
-        "$_sb = [ScriptBlock]::Create($_code)",
-        "$_p = @{ Action = $env:_VBA_ACTION; AccessPath = $env:_VBA_ACCESSPATH; DestinationRoot = $env:_VBA_DESTROOT }",
-        "if ($env:_VBA_BACKENDPATH) { $_p['BackendPath'] = $env:_VBA_BACKENDPATH }",
-        "if ($env:_VBA_ERDPATH) { $_p['ErdPath'] = $env:_VBA_ERDPATH }",
-        "if ($env:_VBA_LOCATION) { $_p['Location'] = $env:_VBA_LOCATION }",
-        "if ($env:_VBA_FORMONLY -eq '1') { $_p['FormOnly'] = [switch]$true }",
-        "if ($env:_VBA_MODULEJSON) { $_p['ModuleNameJson'] = $env:_VBA_MODULEJSON }",
-        "if ($env:_VBA_PASSWORD) { $_p['Password'] = $env:_VBA_PASSWORD }",
-        "& $_sb @_p"
-      ];
-      const psCommand = lines.join("; ");
-
       const args = [
         "-NoProfile",
-        "-NonInteractive",
         "-ExecutionPolicy",
         "Bypass",
-        "-Command",
-        psCommand
+        "-File",
+        this.vbaManagerPath,
+        "-Action",
+        action,
+        "-AccessPath",
+        accessPath || "",
+        "-DestinationRoot",
+        destinationRootAbs || ""
       ];
 
-      let settled = false;
+      if (backendPath) {
+        args.push("-BackendPath", backendPath);
+      }
+      if (erdPath) {
+        args.push("-ErdPath", erdPath);
+      }
+      if (location) {
+        args.push("-Location", location);
+      }
+
+      if (importMode) {
+        args.push("-ImportMode", importMode);
+      }
+
+      if (newModuleName) {
+        args.push("-NewModuleName", newModuleName);
+      }
+
+      if (deleteFromSrc) {
+        args.push("-DeleteFromSrc");
+      }
+
+      // FIX: pasar ModuleName como string unico separado por comas.
+      // PowerShell convierte automaticamente "A,B,C" en [string[]]{"A","B","C"}
+      // cuando el parametro destino es [string[]].
+      // Esto evita toda ambiguedad posicional con otros parametros como -Location.
+      if (Array.isArray(moduleNames) && moduleNames.length > 0) {
+        args.push("-ModuleName", moduleNames.join(","));
+      }
+
+      if (this.password) {
+        args.push("-Password", this.password);
+      }
+
       const child = spawn(exe, args, {
         cwd: this.projectRoot,
-        env,
-        stdio: ["ignore", "pipe", "pipe"],
         windowsHide: true
       });
 
@@ -245,30 +215,8 @@ class AccessVbaSyncSkill {
         stderr += d.toString();
       });
 
-      // Timeout: default 5 minutos, configurable
-      const limit = Number.isFinite(timeoutMs) ? timeoutMs : 300000;
-      const timer = setTimeout(() => {
-        if (settled) return;
-        settled = true;
-        try { child.kill("SIGTERM"); } catch {}
-        setTimeout(() => { try { child.kill("SIGKILL"); } catch {} }, 3000);
-        const err = new Error(`VBAManager.ps1 timeout tras ${Math.round(limit / 1000)}s (action: ${action})`);
-        err.code = "TIMEOUT";
-        err.stdout = stdout;
-        err.stderr = stderr;
-        reject(err);
-      }, limit);
-
-      child.on("error", (e) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        reject(e);
-      });
+      child.on("error", reject);
       child.on("close", (code) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
         if (code === 0) return resolve({ code, stdout, stderr });
         const err = new Error(`VBAManager.ps1 terminó con código ${code}`);
         err.code = code;
@@ -327,8 +275,7 @@ class AccessVbaSyncSkill {
     await this.saveSessionToDisk();
   }
 
-  // formOnly: true = solo .form.txt (formularios), false = excluye .form.txt (código)
-  async importModules({ moduleNames, accessPath, formOnly = false } = {}) {
+  async importModules({ moduleNames, accessPath, importMode = "Auto" } = {}) {
     await this.ensureReady();
     await this.loadSessionFromDisk();
 
@@ -337,16 +284,14 @@ class AccessVbaSyncSkill {
       await this.loadSessionFromDisk();
     }
 
-    // Validar que las rutas de sesión existen en esta máquina.
-    let destinationRootAbs = this._safeDestinationRoot();
-    let dbPath = await this._safeAccessPath(accessPath);
+    const destinationRootAbs = this.session.destinationRoot || this.resolveDestinationRoot();
+    const dbPath = this.session.accessPath || (await this.detectAccessPath({ accessPath }));
     if (!dbPath) throw new Error("No hay BD detectada para importar.");
 
     const mods = uniq((moduleNames || []).map(String).filter(Boolean));
     if (mods.length === 0) throw new Error("No se especificaron módulos para importar.");
 
-    const tipo = formOnly ? "formularios (.form.txt)" : "código (.bas/.cls)";
-    console.log(`🔄 Importando ${mods.length} módulo(s) [${tipo}]: ${mods.join(", ")}`);
+    console.log(`🔄 Importando ${mods.length} módulo(s): ${mods.join(", ")}`);
 
     try {
       await this.runVbaManager({
@@ -354,7 +299,7 @@ class AccessVbaSyncSkill {
         accessPath: dbPath,
         destinationRootAbs,
         moduleNames: mods,
-        formOnly
+        importMode
       });
     } catch (err) {
       if (mods.length > 1 && this.looksLikeModuleArrayNotSupported(err)) {
@@ -364,7 +309,7 @@ class AccessVbaSyncSkill {
             accessPath: dbPath,
             destinationRootAbs,
             moduleNames: [m],
-            formOnly
+            importMode
           });
         }
       } else {
@@ -382,50 +327,48 @@ class AccessVbaSyncSkill {
     console.log("Abre Access → VBE → Debug → Compile");
   }
 
+  async importForms({ moduleNames, accessPath } = {}) {
+    return this.importModules({ moduleNames, accessPath, importMode: "Form" });
+  }
+
+  async importCode({ moduleNames, accessPath } = {}) {
+    return this.importModules({ moduleNames, accessPath, importMode: "Code" });
+  }
+
   async flushPendingImports() {
     if (this.importing) return;
-    const entries = [...this.pendingModules.entries()]; // [[name, type], ...]
-    if (entries.length === 0) return;
+    const mods = uniq([...this.pendingModules]);
+    if (mods.length === 0) return;
 
     const now = Date.now();
-    const readyCode = [];
-    const readyForm = [];
-    const blocked = new Map();
+    const ready = [];
+    const blocked = [];
     let minRemainingMs = null;
 
-    for (const [m, type] of entries) {
+    for (const m of mods) {
       const last = this.lastImportedAtByModule.get(m) || 0;
       const elapsed = now - last;
       if (elapsed < this.cooldownMs) {
         const remaining = this.cooldownMs - elapsed;
-        blocked.set(m, type);
+        blocked.push(m);
         if (minRemainingMs == null || remaining < minRemainingMs) minRemainingMs = remaining;
       } else {
-        if (type === "form") {
-          readyForm.push(m);
-        } else {
-          readyCode.push(m);
-        }
+        ready.push(m);
       }
     }
 
-    this.pendingModules = blocked;
+    this.pendingModules = new Set(blocked);
 
-    if (readyCode.length === 0 && readyForm.length === 0) {
+    if (ready.length === 0) {
       if (minRemainingMs != null) this.scheduleDebouncedImport(Math.max(50, minRemainingMs));
       return;
     }
 
     this.importing = true;
     try {
-      if (readyCode.length > 0) {
-        await this.importModules({ moduleNames: readyCode, formOnly: false });
-      }
-      if (readyForm.length > 0) {
-        await this.importFormModules({ moduleNames: readyForm });
-      }
+      await this.importModules({ moduleNames: ready });
       const doneAt = Date.now();
-      for (const m of [...readyCode, ...readyForm]) this.lastImportedAtByModule.set(m, doneAt);
+      for (const m of ready) this.lastImportedAtByModule.set(m, doneAt);
     } finally {
       this.importing = false;
       if (this.pendingModules.size > 0) this.scheduleDebouncedImport();
@@ -435,7 +378,7 @@ class AccessVbaSyncSkill {
   scheduleDebouncedImport(delayMs) {
     if (this.debounceTimer) clearTimeout(this.debounceTimer);
 
-    this.session.pendingModules = uniq([...(this.session.pendingModules || []), ...this.pendingModules.keys()]);
+    this.session.pendingModules = uniq([...(this.session.pendingModules || []), ...this.pendingModules]);
     this.saveSessionToDisk().catch(() => {});
 
     this.debounceTimer = setTimeout(async () => {
@@ -490,12 +433,7 @@ class AccessVbaSyncSkill {
       }
       const mod = moduleNameFromFile(filePath);
       if (!mod) return;
-      const type = isFormTxtFile(filePath) ? "form" : "code";
-      // Si ya hay un pending del mismo modulo, "form" tiene prioridad
-      const existing = this.pendingModules.get(mod);
-      if (!existing || type === "form") {
-        this.pendingModules.set(mod, type);
-      }
+      this.pendingModules.add(mod);
       this.scheduleDebouncedImport();
     };
 
@@ -567,28 +505,14 @@ class AccessVbaSyncSkill {
     await this.stopWatcherProcessIfDifferentPid();
     await this.stopWatching();
 
-    const pending = uniq([...(this.session.pendingModules || []), ...this.pendingModules.keys()]);
-    // Separate form modules from code modules for pending flush
-    const pendingForms = [];
-    const pendingCode = [];
-    for (const m of pending) {
-      if (this.pendingModules.get(m) === "form") {
-        pendingForms.push(m);
-      } else {
-        pendingCode.push(m);
-      }
-    }
+    const pending = uniq([...(this.session.pendingModules || []), ...this.pendingModules]);
     this.pendingModules.clear();
     this.session.pendingModules = [];
     await this.saveSessionToDisk();
 
-    if (pendingCode.length > 0) {
-      console.log(`🔄 Sync final de pendientes (código): ${pendingCode.join(", ")}`);
-      await this.importModules({ moduleNames: pendingCode });
-    }
-    if (pendingForms.length > 0) {
-      console.log(`🔄 Sync final de pendientes (formularios): ${pendingForms.join(", ")}`);
-      await this.importFormModules({ moduleNames: pendingForms });
+    if (pending.length > 0) {
+      console.log(`🔄 Sync final de pendientes: ${pending.join(", ")}`);
+      await this.importModules({ moduleNames: pending });
     }
 
     if (this.autoExportOnEnd) {
@@ -617,8 +541,8 @@ class AccessVbaSyncSkill {
     await this.ensureReady();
     await this.loadSessionFromDisk();
 
-    const destinationRootAbs = this._safeDestinationRoot();
-    const dbPath = await this._safeAccessPath(accessPath);
+    const destinationRootAbs = this.session.destinationRoot || this.resolveDestinationRoot();
+    const dbPath = this.session.accessPath || (await this.detectAccessPath({ accessPath }));
     if (!dbPath) throw new Error("No hay BD detectada para fix-encoding.");
 
     const mods = moduleNames && moduleNames.length > 0
@@ -643,13 +567,10 @@ class AccessVbaSyncSkill {
     await this.ensureReady();
     await this.loadSessionFromDisk();
 
-    if (!this.session.active) {
-      await this.start({ accessPath });
-      await this.loadSessionFromDisk();
-    }
-
-    const destinationRootAbs = this._safeDestinationRoot();
-    const dbPath = await this._safeAccessPath(accessPath);
+    // FIX: si no hay sesión activa, detectar BD y destination sin hacer start()
+    // completo (que haría un export-all innecesario antes del selectivo).
+    const destinationRootAbs = this.session.destinationRoot || this.resolveDestinationRoot();
+    const dbPath = this.session.accessPath || (await this.detectAccessPath({ accessPath }));
     if (!dbPath) throw new Error("No hay BD detectada para exportar.");
 
     const mods = uniq((moduleNames || []).map(String).filter(Boolean));
@@ -674,7 +595,7 @@ class AccessVbaSyncSkill {
     const detectedAccess = await this.detectAccessPath({ accessPath });
     if (!detectedAccess) throw new Error("No hay BD detectada para exportar.");
 
-    const destinationRootAbs = this._safeDestinationRoot();
+    const destinationRootAbs = this.session.destinationRoot || this.resolveDestinationRoot();
 
     console.log("📤 Exportando todos los módulos...");
     await this.runVbaManager({
@@ -694,8 +615,8 @@ class AccessVbaSyncSkill {
       await this.loadSessionFromDisk();
     }
 
-    const destinationRootAbs = this._safeDestinationRoot();
-    const dbPath = await this._safeAccessPath(accessPath);
+    const destinationRootAbs = this.session.destinationRoot || this.resolveDestinationRoot();
+    const dbPath = this.session.accessPath || (await this.detectAccessPath({ accessPath }));
     if (!dbPath) throw new Error("No hay BD detectada para importar.");
 
     console.log("📥 Importando todos los módulos desde src/...");
@@ -705,138 +626,129 @@ class AccessVbaSyncSkill {
       destinationRootAbs
     });
 
-    this.session.lastSyncAt = new Date().toISOString();
-    await this.saveSessionToDisk();
-
     console.log("✅ Import-all completado.");
     console.log("Abre Access → VBE → Debug → Compile");
   }
 
-  // Import solo formularios (.form.txt)
-  async importFormModules({ moduleNames, accessPath } = {}) {
+  // ─── NUEVO: deleteModules ───────────────────────────────────────────
+  async deleteModules({ moduleNames, accessPath, deleteFromSrc = false } = {}) {
     await this.ensureReady();
     await this.loadSessionFromDisk();
 
-    if (!this.session.active) {
-      await this.start({ accessPath });
-      await this.loadSessionFromDisk();
-    }
-
-    const destinationRootAbs = this._safeDestinationRoot();
-    const dbPath = await this._safeAccessPath(accessPath);
-    if (!dbPath) throw new Error("No hay BD detectada para importar.");
+    const destinationRootAbs = this.session.destinationRoot || this.resolveDestinationRoot();
+    const dbPath = this.session.accessPath || (await this.detectAccessPath({ accessPath }));
+    if (!dbPath) throw new Error("No hay BD detectada para borrar módulos.");
 
     const mods = uniq((moduleNames || []).map(String).filter(Boolean));
-    if (mods.length === 0) throw new Error("No se especificaron formularios para importar.");
+    if (mods.length === 0) throw new Error("No se especificaron módulos para borrar.");
 
-    console.log(`🔄 Importando ${mods.length} formulario(s) [.form.txt]: ${mods.join(", ")}`);
-
-    try {
-      await this.runVbaManager({
-        action: "Import",
-        accessPath: dbPath,
-        destinationRootAbs,
-        moduleNames: mods,
-        formOnly: true
-      });
-    } catch (err) {
-      if (mods.length > 1 && this.looksLikeModuleArrayNotSupported(err)) {
-        for (const m of mods) {
-          await this.runVbaManager({
-            action: "Import",
-            accessPath: dbPath,
-            destinationRootAbs,
-            moduleNames: [m],
-            formOnly: true
-          });
-        }
-      } else {
-        throw err;
-      }
-    }
-
-    const now = new Date().toISOString();
-    this.session.lastSyncAt = now;
-    this.session.changedModules = uniq([...(this.session.changedModules || []), ...mods]);
-    this.session.pendingModules = [];
-    await this.saveSessionToDisk();
-
-    console.log("✅ Import-form terminado.");
-    console.log("Abre Access → VBE → Debug → Compile");
-  }
-
-  // Import todos los formularios desde src/
-  async importFormAll({ accessPath } = {}) {
-    await this.ensureReady();
-    await this.loadSessionFromDisk();
-
-    if (!this.session.active) {
-      await this.start({ accessPath });
-      await this.loadSessionFromDisk();
-    }
-
-    const destinationRootAbs = this._safeDestinationRoot();
-    const dbPath = await this._safeAccessPath(accessPath);
-    if (!dbPath) throw new Error("No hay BD detectada para importar.");
-
-    console.log("📥 Importando todos los formularios [.form.txt] desde src/...");
-    await this.runVbaManager({
-      action: "Import",
-      accessPath: dbPath,
-      destinationRootAbs,
-      formOnly: true
-    });
-
-    this.session.lastSyncAt = new Date().toISOString();
-    await this.saveSessionToDisk();
-
-    console.log("✅ Import-form-all completado.");
-    console.log("Abre Access → VBE → Debug → Compile");
-  }
-
-  async generateErd({ backendPath, erdPath } = {}) {
-    await this.ensureReady();
-    await this.loadSessionFromDisk();
-
-    const destinationRootAbs = this._safeDestinationRoot();
-
-    console.log("📊 Generando ERD...");
-    await this.runVbaManager({
-      action: "Generate-ERD",
-      accessPath: "",
-      destinationRootAbs,
-      backendPath,
-      erdPath
-    });
-    console.log("✅ ERD Generado.");
-  }
-
-  async deleteModules({ moduleNames, accessPath } = {}) {
-    await this.ensureReady();
-    await this.loadSessionFromDisk();
-
-    if (!this.session.active) {
-      await this.start({ accessPath });
-      await this.loadSessionFromDisk();
-    }
-
-    const destinationRootAbs = this._safeDestinationRoot();
-    const dbPath = await this._safeAccessPath(accessPath);
-    if (!dbPath) throw new Error("No hay BD detectada para eliminar módulos.");
-
-    const mods = uniq((moduleNames || []).map(String).filter(Boolean));
-    if (mods.length === 0) throw new Error("No se especificaron módulos para eliminar.");
-
-    console.log(`🗑️  Eliminando ${mods.length} módulo(s): ${mods.join(", ")}`);
+    console.log(`🗑️  Borrando ${mods.length} módulo(s): ${mods.join(", ")}`);
+    if (deleteFromSrc) console.log("   (también se borrarán de src/)");
 
     await this.runVbaManager({
       action: "Delete",
       accessPath: dbPath,
       destinationRootAbs,
-      moduleNames: mods
+      moduleNames: mods,
+      deleteFromSrc
     });
 
-    console.log("✅ Delete terminado.");
+    // Quitar de changedModules si estaban
+    if (this.session.changedModules) {
+      this.session.changedModules = this.session.changedModules.filter(
+        (m) => !mods.some((d) => d.toLowerCase() === m.toLowerCase())
+      );
+    }
+    await this.saveSessionToDisk();
+
+    console.log("✅ Delete completado.");
+  }
+
+  // ─── NUEVO: renameModule ────────────────────────────────────────────
+  async renameModule({ oldName, newName, accessPath } = {}) {
+    await this.ensureReady();
+    await this.loadSessionFromDisk();
+
+    const destinationRootAbs = this.session.destinationRoot || this.resolveDestinationRoot();
+    const dbPath = this.session.accessPath || (await this.detectAccessPath({ accessPath }));
+    if (!dbPath) throw new Error("No hay BD detectada para renombrar módulos.");
+
+    if (!oldName || !newName) throw new Error("Se necesitan oldName y newName.");
+    if (oldName === newName) throw new Error("El nombre antiguo y el nuevo son iguales.");
+
+    console.log(`✏️  Renombrando: ${oldName} → ${newName}`);
+
+    await this.runVbaManager({
+      action: "Rename",
+      accessPath: dbPath,
+      destinationRootAbs,
+      moduleNames: [oldName],
+      newModuleName: newName
+    });
+
+    // Actualizar changedModules
+    if (this.session.changedModules) {
+      this.session.changedModules = this.session.changedModules.map(
+        (m) => (m.toLowerCase() === oldName.toLowerCase() ? newName : m)
+      );
+      if (!this.session.changedModules.includes(newName)) {
+        this.session.changedModules.push(newName);
+      }
+    }
+    await this.saveSessionToDisk();
+
+    console.log("✅ Rename completado.");
+  }
+
+  // ─── NUEVO: listModules ─────────────────────────────────────────────
+  async listModules({ accessPath } = {}) {
+    await this.ensureReady();
+    await this.loadSessionFromDisk();
+
+    const dbPath = this.session.accessPath || (await this.detectAccessPath({ accessPath }));
+    if (!dbPath) throw new Error("No hay BD detectada para listar módulos.");
+
+    const destinationRootAbs = this.session.destinationRoot || this.resolveDestinationRoot();
+
+    const result = await this.runVbaManager({
+      action: "List",
+      accessPath: dbPath,
+      destinationRootAbs
+    });
+
+    // El PS1 imprime la lista por stdout
+    if (result.stdout) {
+      process.stdout.write(result.stdout);
+    }
+  }
+
+  async generateErd({ backendPath, erdPath, accessPath } = {}) {
+    await this.ensureReady();
+    await this.loadSessionFromDisk();
+
+    const destinationRootAbs = this.session.destinationRoot || this.resolveDestinationRoot();
+
+    // Resolver accessPath: explícito > sesión activa > auto-detect
+    let resolvedAccess = accessPath || null;
+    if (!resolvedAccess && !backendPath) {
+      // Sin --backend ni --access: el PS1 auto-detecta, pero pasamos la sesión si hay
+      resolvedAccess = this.session.accessPath || null;
+    }
+
+    const targets = [];
+    if (backendPath) targets.push(`backend: ${backendPath}`);
+    if (resolvedAccess) targets.push(`frontend: ${resolvedAccess}`);
+    if (targets.length === 0) targets.push("auto-detect");
+    console.log(`📊 Generando ERD (${targets.join(", ")})...`);
+
+    await this.runVbaManager({
+      action: "Generate-ERD",
+      accessPath: resolvedAccess || "",
+      destinationRootAbs,
+      backendPath,
+      erdPath
+    });
+    console.log("✅ ERD Generado.");
   }
 
   async status() {

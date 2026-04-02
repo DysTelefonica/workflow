@@ -52,50 +52,56 @@ function printHelp() {
   console.log(
     [
       "Uso:",
-      "  node cli.js start            [--access <ruta>] [--destination_root <dir>] [--password <pwd>]",
-      "  node cli.js watch            [--access <ruta>] [--destination_root <dir>] [--debounce_ms <n>] [--password <pwd>]",
-      "  node cli.js export  <Mod..>  [--access <ruta>] [--destination_root <dir>] [--password <pwd>]",
-      "  node cli.js export-all       [--access <ruta>] [--destination_root <dir>] [--password <pwd>]",
-      "  node cli.js export-form <Mod..> [--access <ruta>] [--password <pwd>]",
-      "  node cli.js import  <Mod..>  [--access <ruta>] [--destination_root <dir>] [--password <pwd>]",
-      "  node cli.js import-all       [--access <ruta>] [--destination_root <dir>] [--password <pwd>]",
-      "  node cli.js import-form <Mod..> [--access <ruta>] [--password <pwd>]",
-      "  node cli.js import-form-all  [--access <ruta>] [--destination_root <dir>] [--password <pwd>]",
-      "  node cli.js sync    <Mod..>  [--access <ruta>] [--destination_root <dir>] [--password <pwd>]",
-      "  node cli.js fix-encoding     [--access <ruta>] [--destination_root <dir>] [--password <pwd>] [--location Both|Src|Access] [<Mod...>]",
-      "  node cli.js generate-erd    [--backend <ruta>] [--erd_path <dir>] [--password <pwd>]",
-      "  node cli.js delete-module <Mod..> [--access <ruta>] [--password <pwd>]",
+      "  node cli.js start          [--access <ruta>] [--destination_root <dir>] [--password <pwd>]",
+      "  node cli.js watch          [--access <ruta>] [--destination_root <dir>] [--debounce_ms <n>] [--password <pwd>]",
+      "  node cli.js export  <Mod..>[--access <ruta>] [--destination_root <dir>] [--password <pwd>]",
+      "  node cli.js export-all     [--access <ruta>] [--destination_root <dir>] [--password <pwd>]",
+      "  node cli.js import  <Mod..>[--access <ruta>] [--destination_root <dir>] [--password <pwd>]",
+      "  node cli.js import-form <Mod..>[--access <ruta>] [--destination_root <dir>] [--password <pwd>]",
+      "  node cli.js import-code <Mod..>[--access <ruta>] [--destination_root <dir>] [--password <pwd>]",
+      "  node cli.js import-all     [--access <ruta>] [--destination_root <dir>] [--password <pwd>]",
+      "  node cli.js sync    <Mod..>[--access <ruta>] [--destination_root <dir>] [--password <pwd>]",
+      "  node cli.js delete  <Mod..>[--access <ruta>] [--destination_root <dir>] [--password <pwd>] [--delete-src]",
+      "  node cli.js rename  <Old> <New> [--access <ruta>] [--destination_root <dir>] [--password <pwd>]",
+      "  node cli.js list           [--access <ruta>] [--password <pwd>]",
+      "  node cli.js fix-encoding   [--access <ruta>] [--destination_root <dir>] [--password <pwd>] [--location Both|Src|Access] [<Mod...>]",
+      "  node cli.js generate-erd   [--access <ruta>] [--backend <ruta>] [--erd_path <dir>] [--password <pwd>]",
       "  node cli.js status",
-      "  node cli.js end              [--auto_export_on_end false]",
+      "  node cli.js end            [--auto_export_on_end false]",
       "",
       "Comandos:",
-      "  start              Export inicial de todos los módulos + inicia sesión",
-      "  watch              Inicia sesión (si no hay) + auto-sync al guardar archivos",
-      "  export  <Mod..>    Exporta módulos específicos (código: .bas/.cls) de la BD hacia src/",
-      "  export-all         Exporta todos los módulos de la BD hacia src/",
-      "  export-form <Mod..> Exporta SOLO formularios (.form.txt) — ignora código",
-      "  import  <Mod..>    Importa módulos específicos de código (.bas/.cls) hacia la BD — ignora .form.txt",
-      "  import-all         Importa todos los módulos de código desde src/ hacia la BD",
-      "  import-form <Mod..> Importa SOLO formularios (.form.txt) hacia la BD",
-      "  import-form-all    Importa todos los formularios (.form.txt) desde src/",
-      "  sync    <Mod..>    Alias de import (código)",
-      "  fix-encoding       Corrige encoding (ANSI→UTF-8 sin BOM) en src/, en la BD, o en ambos",
-      "  generate-erd       Genera documentación de estructura de tablas en Markdown",
-      "  delete-module <Mod..> Elimina módulos VBA de la BD (NO elimina archivos en src/)",
-      "  status             Muestra el estado de la sesión activa",
-      "  end                Cierra la sesión y restaura la configuración de Access",
+      "  start            Export inicial de todos los módulos + inicia sesión",
+      "  watch            Inicia sesión (si no hay) + auto-sync al guardar archivos",
+      "  export  <Mod..>  Exporta módulos específicos de la BD hacia src/",
+      "  export-all       Exporta todos los módulos de la BD hacia src/",
+      "  import  <Mod..>  Importa módulos específicos de src/ hacia la BD",
+      "  import-form <Mod..> Importa formularios desde *.form.txt (UI + código)",
+      "  import-code <Mod..> Importa code-behind desde *.cls/*.bas (sin layout)",
+      "  import-all       Importa todos los módulos de src/ hacia la BD",
+      "  sync    <Mod..>  Alias de import",
+      "  delete  <Mod..>  Borra módulos de la BD (y opcionalmente de src/ con --delete-src)",
+      "  rename  <Old> <New>  Renombra un módulo en la BD y en src/",
+      "  list             Lista todos los módulos VBA de la BD con su tipo",
+      "  fix-encoding     Corrige encoding (ANSI→UTF-8 sin BOM) en src/, en la BD, o en ambos",
+      "                   Sin módulos: procesa todos. Con módulos: solo los indicados.",
+      "  generate-erd     Genera documentación de estructura de tablas en Markdown",
+      "                   --backend: ERD del backend. --access: ERD del frontend (tablas vinculadas).",
+      "                   Ambos: genera los dos. Ninguno: auto-detecta.",
+      "  status           Muestra el estado de la sesión activa",
+      "  end              Cierra la sesión y restaura la configuración de Access",
       "",
       "Flags comunes:",
       "  --access <ruta>              Ruta .accdb/.accde/.mdb/.mde (relativa a CWD o absoluta)",
-      "  --password <pwd>              Contraseña de la BD si está protegida",
-      "  --destination_root <dir>      Carpeta de export/import (default: src)",
+      "  --password <pwd>             Contraseña de la BD si está protegida",
+      "  --destination_root <dir>     Carpeta de export/import (default: src)",
       "",
       "Flags específicos:",
-      "  --debounce_ms <n>             Debounce para watch en ms (default: 600)",
-      "  --auto_export_on_end false    Desactiva export final al cerrar sesión",
-      "  --location Both|Src|Access    Para fix-encoding: dónde aplicar (default: Both)",
+      "  --debounce_ms <n>            Debounce para watch en ms (default: 600)",
+      "  --auto_export_on_end false   Desactiva export final al cerrar sesión",
+      "  --location Both|Src|Access   Para fix-encoding: dónde aplicar (default: Both)",
       "  --backend <ruta>             Para generate-erd: ruta al backend _Datos.accdb",
-      "  --erd_path <dir>              Para generate-erd: carpeta de salida (default: docs/ERD)"
+      "  --erd_path <dir>             Para generate-erd: carpeta de salida (default: docs/ERD)",
+      "  --delete-src                 Para delete: borrar también los archivos de src/"
     ].join("\n")
   );
 }
@@ -144,18 +150,6 @@ async function main() {
     return;
   }
 
-  // export-form: Exporta SOLO formularios (.form.txt) — ignora código
-  // PS1 Export ya detecta tipo por nombre de componente (Form_ → .form.txt)
-  if (command === "export-form") {
-    if (mods.length === 0) {
-      console.error("Faltan formularios. Ejemplo: node cli.js export-form Form_FormInicial Form_FormGestion");
-      process.exitCode = 1;
-      return;
-    }
-    await skill.exportModules({ moduleNames: mods, accessPath });
-    return;
-  }
-
   if (command === "import" || command === "sync") {
     if (mods.length === 0) {
       console.error("Faltan módulos. Ejemplo: node cli.js import Utilidades Validaciones");
@@ -166,25 +160,60 @@ async function main() {
     return;
   }
 
+  if (command === "import-form") {
+    if (mods.length === 0) {
+      console.error("Faltan módulos. Ejemplo: node cli.js import-form Form_frmDatosPC");
+      process.exitCode = 1;
+      return;
+    }
+    await skill.importForms({ moduleNames: mods, accessPath });
+    return;
+  }
+
+  if (command === "import-code") {
+    if (mods.length === 0) {
+      console.error("Faltan módulos. Ejemplo: node cli.js import-code Form_frmDatosPC");
+      process.exitCode = 1;
+      return;
+    }
+    await skill.importCode({ moduleNames: mods, accessPath });
+    return;
+  }
+
   if (command === "import-all") {
     await skill.importAll({ accessPath });
     return;
   }
 
-  // import-form: Importa SOLO formularios (.form.txt) — ignora código
-  if (command === "import-form") {
+  if (command === "delete") {
     if (mods.length === 0) {
-      console.error("Faltan formularios. Ejemplo: node cli.js import-form Form_FormInicial Form_FormGestion");
+      console.error("Faltan módulos. Ejemplo: node cli.js delete Utilidades Form_FormViejo");
       process.exitCode = 1;
       return;
     }
-    await skill.importFormModules({ moduleNames: mods, accessPath });
+    const deleteFromSrc = toBoolFlag(flags["delete-src"], false);
+    await skill.deleteModules({ moduleNames: mods, accessPath, deleteFromSrc });
     return;
   }
 
-  // import-form-all: Importa todos los formularios (.form.txt) desde src/
-  if (command === "import-form-all") {
-    await skill.importFormAll({ accessPath });
+  if (command === "rename") {
+    if (mods.length < 2) {
+      console.error("Se necesitan dos argumentos: <NombreAntiguo> <NombreNuevo>");
+      console.error("Ejemplo: node cli.js rename modViejo modNuevo");
+      process.exitCode = 1;
+      return;
+    }
+    if (mods.length > 2) {
+      console.error("Solo se puede renombrar un módulo a la vez.");
+      process.exitCode = 1;
+      return;
+    }
+    await skill.renameModule({ oldName: mods[0], newName: mods[1], accessPath });
+    return;
+  }
+
+  if (command === "list") {
+    await skill.listModules({ accessPath });
     return;
   }
 
@@ -203,17 +232,7 @@ async function main() {
   if (command === "generate-erd") {
     const backendPath = normalizePathFlag(flags.backend);
     const erdPath = normalizePathFlag(flags.erd_path || "docs/ERD");
-    await skill.generateErd({ backendPath, erdPath });
-    return;
-  }
-
-  if (command === "delete-module") {
-    if (mods.length === 0) {
-      console.error("Faltan módulos. Ejemplo: node cli.js delete-module Tests_Equivalencia");
-      process.exitCode = 1;
-      return;
-    }
-    await skill.deleteModules({ moduleNames: mods, accessPath });
+    await skill.generateErd({ backendPath, erdPath, accessPath });
     return;
   }
 
