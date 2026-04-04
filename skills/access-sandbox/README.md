@@ -213,37 +213,34 @@ pero sin tocar jamás el backend protegido original.
 
 ---
 
-## Ejemplo CONDOR aplicado
+## Ejemplo multi-backend
 
-CONDOR tiene **3 backends externos**: Expedientes_datos.accdb, NoConformidades_Datos.accdb y Lanzadera_Datos.accdb. El localize requiere un mapa de sidecars.
+Cuando un frontend tiene tablas vinculadas a **múltiples backends externos**, el localize requiere un mapa de sidecars:
 
 ```powershell
-# Rutas reales de CONDOR
-$condorRoot = "\\datoste\aplicaciones_dys\Aplicaciones PpD\CONDOR"
-$localSandbox = "C:\sandboxes\CONDOR\condor_datos.accdb"
-$sidecarRoot = "C:\sandboxes\CONDOR\sidecars"
+$networkRoot = "\\servidor\share\MiApp"
+$localSandbox = "C:\sandboxes\MiApp\MiApp_datos.accdb"
+$sidecarRoot = "C:\sandboxes\MiApp\sidecars"
 
-# Mapa multi-backend: cada backend externo → su sidecar sin password
-# (NO usar ConvertTo-Json aquí — el hashtable se itera directamente para Make-Sidecar)
+# Mapa: cada backend externo → su sidecar sin password
 $backendMap = @{
-    "$condorRoot\Expedientes_datos.accdb"      = "$sidecarRoot\Expedientes_datos_nopass.accdb"
-    "$condorRoot\NoConformidades_Datos.accdb"   = "$sidecarRoot\NoConformidades_Datos_nopass.accdb"
-    "$condorRoot\Lanzadera_Datos.accdb"         = "$sidecarRoot\Lanzadera_Datos_nopass.accdb"
-    "$condorRoot\condor_datos.accdb"            = "$sidecarRoot\condor_datos_nopass.accdb"
+    "$networkRoot\Backend_A.accdb" = "$sidecarRoot\Backend_A_nopass.accdb"
+    "$networkRoot\Backend_B.accdb" = "$sidecarRoot\Backend_B_nopass.accdb"
+    "$networkRoot\Backend_C.accdb" = "$sidecarRoot\Backend_C_nopass.accdb"
 }
 
 # 1. Copiar backend principal a sandbox
 & ".agent/skills/access-sandbox/SandboxManager.ps1" `
     -Action New-Sandbox `
-    -SourceBackend "$condorRoot\condor_datos.accdb" `
+    -SourceBackend "$networkRoot\MiApp_datos.accdb" `
     -SandboxPath $localSandbox
 
-# 2. Crear sidecar sin password para c/ backend externo (usar hashtable directamente)
+# 2. Crear sidecar sin password para cada backend (hashtable directo)
 foreach ($src in $backendMap.Keys) {
     & ".agent/skills/access-sandbox/SandboxManager.ps1" `
         -Action Make-Sidecar `
         -SourceBackend $src `
-        -Password "dpddpd" `
+        -Password "mipassword" `
         -SidecarSuffix "_nopass"
 }
 
@@ -275,12 +272,11 @@ foreach ($src in $backendMap.Keys) {
 
 ## Notas de implementación
 
+- **DAO puro**: Las acciones usan `DAO.DBEngine` directamente, sin instanciar `Access.Application` — no hay ventanas, prompts ni diálogos
 - **COM cleanup**: usa `FinalReleaseComObject` + `GC.Collect()` + `GC.WaitForPendingFinalizers()` para limpieza determinística
-- **DAO versions**: intenta 160 → 150 → 140 → 120 en cascada
+- **DAO versions**: intenta 160 → 150 → 140 → 120 → 36 en cascada
 - **Compact**: `Localize-Sandbox` compacts la BD al final para limpiar espacio
-- **Seguridad**: `AutomationSecurity = 1` desactiva prompts de macro
-- **Headless**: `Visible = $false`, `UserControl = $false`
-- **Unattended**: `SetWarnings($false)` se aplica al abrir la sesión — ningún prompt de Access aparece durante localize
+- **`Open-AccessSession`**: Helper disponible pero no usado por ninguna acción actual. Configura `Visible=$false`, `UserControl=$false`, `AutomationSecurity=1`, `SetWarnings=$false` para operaciones que requieran Access COM
 
 ---
 
@@ -320,7 +316,7 @@ Close-AccessSession -Session $session
 ```
 
 > **Nota:** El path VBA/macro (usar `CurrentDb` desde macros AutoExec o módulos VBA para
-> localize) está **DEPRECADO**. El flujo PowerShell con `Open-AccessSession` es el único
+> localize) está **DEPRECADO**. El flujo PowerShell con DAO puro es el único
 > camino soportado a partir de esta versión. No editar código VBA para localize.
 
 ---

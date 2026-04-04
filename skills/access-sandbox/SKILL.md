@@ -48,7 +48,7 @@
 | `-WhatIf` | `switch` | No | Simula sin escribir archivos |
 | `-Verbose` | `switch` | No | Salida detallada |
 
-*`Localize-Sandbox` requiere `-BackendSidecarMapJson` cuando el sandbox tiene tablas vinculadas a **múltiples** backends externos (ej: CONDOR con Expedientes_datos, NoConformidades_datos, Lanzadera_datos). Si solo hay un backend, puede usarse `-SourceSidecar` directamente.
+*`Localize-Sandbox` requiere `-BackendSidecarMapJson` cuando el sandbox tiene tablas vinculadas a **múltiples** backends externos. Si solo hay un backend, puede usarse `-SourceSidecar` directamente.
 *`New-Sandbox` y `Localize-Sandbox` requieren `-SourceBackend` y `-SandboxPath`.
 *`Discover-LinkedTables` requiere `-SandboxPath` únicamente.
 
@@ -101,8 +101,8 @@ Genera: `C:\proyecto\datos\MiBackend_nopass.accdb`
 - Usa `DAO.DBEngine.OpenDatabase` con `;PWD=` para abrir el protegido
 - Crea un nuevo archivo ACCDB vacío
 - Itera todas las `TableDefs` del protegido y las copia al sidecar:
-  - Tablas locales: copy completa (datos + esquema)
-  - Tablas vinculadas: se recrean como **tablas locales** en el sidecar con los mismos datos de origen
+  - Tablas locales: copia completa (datos + esquema + atributos de campo)
+  - Tablas vinculadas: se **saltan** — cada backend externo necesita su propio `Make-Sidecar`, y `Localize-Sandbox` resuelve cada tabla via `-BackendSidecarMapJson`
 - El sidecar queda **sin contraseña**
 - Útil cuando el sandbox necesita acceder a datos de un backend protegido sin conocer la password
 
@@ -137,30 +137,26 @@ Flujo interno:
 
 ---
 
-## Arquitectura COM
+## Arquitectura DAO
 
-El script sigue el patrón canónico de `access-vba-sync/VBAManager.ps1`:
+El script usa **DAO puro** para todas las operaciones sobre datos y esquema. No se instancia `Access.Application` en ninguna acción:
 
 ```powershell
-# helpers canonicales (disponibles en SandboxManager.ps1)
-# Open-AccessSession — abre session unattended con tracking de PID
-$session = Open-AccessSession -AccessPath $AccessPath -Password $Password
-$access  = $session.AccessApplication
-$accessPid = $session.ProcessId
+$engine = New-DaoDbEngine  # intenta 160→150→140→120→36 en cascada
+$db = $engine.OpenDatabase($Path, $false, $false, $ConnectionString)
 
-# Acceso a BD abierto — sin prompts (SetWarnings=$false ya aplicado)
-$access.DoCmd.SetWarnings($false)
+# ... operaciones DAO (TableDefs, Recordsets, Indexes, Relations) ...
 
-# ... operaciones ...
-
-# Cierre limpio con Close-AccessSession
-Close-AccessSession -Session $session
+$db.Close()
+[System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($db) | Out-Null
+[System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($engine) | Out-Null
+[System.GC]::Collect()
+[System.GC]::WaitForPendingFinalizers()
 ```
 
-> **Phase 2 (VBA-based):** El flujo que usaba VBA/macros como paso intermedio para
-> localize está **DEPRECADO**. El camino correcto es el flujo PowerShell 100% unattended
-> descrito en este documento. No se debe usar `DoCmd.DeleteObject` ni `CurrentDb` desde
-> macros VBA para localize — esa ruta ya no es el path recomendado.
+> `Open-AccessSession` / `Close-AccessSession` están disponibles como helpers para operaciones
+> que requieran `Access.Application` (macros, DoCmd), pero **no se usan en ninguna acción
+> actual**. Todas las acciones operan vía DAO sin instanciar Access.
 
 Para DAO:
 
@@ -261,7 +257,7 @@ El sandbox localizeado es un objetivo seguro para generación de ERDs (no toca e
 # Generar ERD desde el sandbox (herramienta de tu elección, ejemplo conceptual)
 # El sandbox en C:\Sandbox\MiApp_Datos.accdb ya tiene:
 #   - Todas las tablas como locales
-#   - Datos copiados (para referencias完整性)
+#   - Datos copiados (para integridad referencial)
 #   - Sin password
 #   - Sin vínculos externos
 
@@ -299,5 +295,5 @@ El resultado es un ERD del esquema completo sin haber tocado `MiApp_Datos.accdb`
 - `New-Sandbox` → archivo copiado, tamaño > 0, tamaño igual al fuente (copia bit-a-bit)
 - `Discover-LinkedTables` sobre sandbox sin vínculos → array vacío
 - `Discover-LinkedTables` sobre sandbox con vínculos → array con n elementos `{TableName, Connect, SourceTable}`
-- `Make-Sidecar` → archivo generado, `OpenDatabase` sin password exitoso
+- `Make-Sidecar` → archivo generado, `OpenDatabase` sin password exitoso, solo contiene tablas locales del backend fuente (las vinculadas se saltan)
 - `Localize-Sandbox` → después de la operación, `Discover-LinkedTables` retorna array vacío
