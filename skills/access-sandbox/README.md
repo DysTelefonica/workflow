@@ -224,12 +224,13 @@ $localSandbox = "C:\sandboxes\CONDOR\condor_datos.accdb"
 $sidecarRoot = "C:\sandboxes\CONDOR\sidecars"
 
 # Mapa multi-backend: cada backend externo → su sidecar sin password
+# (NO usar ConvertTo-Json aquí — el hashtable se itera directamente para Make-Sidecar)
 $backendMap = @{
     "$condorRoot\Expedientes_datos.accdb"      = "$sidecarRoot\Expedientes_datos_nopass.accdb"
     "$condorRoot\NoConformidades_Datos.accdb"   = "$sidecarRoot\NoConformidades_Datos_nopass.accdb"
     "$condorRoot\Lanzadera_Datos.accdb"         = "$sidecarRoot\Lanzadera_Datos_nopass.accdb"
     "$condorRoot\condor_datos.accdb"            = "$sidecarRoot\condor_datos_nopass.accdb"
-} | ConvertTo-Json -Compress
+}
 
 # 1. Copiar backend principal a sandbox
 & ".agent/skills/access-sandbox/SandboxManager.ps1" `
@@ -237,9 +238,8 @@ $backendMap = @{
     -SourceBackend "$condorRoot\condor_datos.accdb" `
     -SandboxPath $localSandbox
 
-# 2. Crear sidecar sin password para c/ backend externo
+# 2. Crear sidecar sin password para c/ backend externo (usar hashtable directamente)
 foreach ($src in $backendMap.Keys) {
-    $sidecar = $backendMap[$src]
     & ".agent/skills/access-sandbox/SandboxManager.ps1" `
         -Action Make-Sidecar `
         -SourceBackend $src `
@@ -247,11 +247,11 @@ foreach ($src in $backendMap.Keys) {
         -SidecarSuffix "_nopass"
 }
 
-# 3. Localizar sandbox (multi-backend map)
+# 3. Localizar sandbox (convertir hashtable a JSON SOLO para el parámetro)
 & ".agent/skills/access-sandbox/SandboxManager.ps1" `
     -Action Localize-Sandbox `
     -SandboxPath $localSandbox `
-    -BackendSidecarMapJson $backendMap
+    -BackendSidecarMapJson ($backendMap | ConvertTo-Json -Compress)
 ```
 
 ---

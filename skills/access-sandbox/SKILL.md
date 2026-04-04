@@ -290,13 +290,13 @@ El resultado es un ERD del esquema completo sin haber tocado `MiApp_Datos.accdb`
 - **Sandbox ya localizeado** → `Discover-LinkedTables` retornará vacío (sin vínculos)
 - **Backend fuente bloqueado por otro proceso** → error claro con path del proceso bloqueante
 - **ACCESS NO instalado** → el script valida `New-Object -ComObject Access.Application` al inicio y muere con error legible
-- **Versiones DAO no disponibles** → intenta 120→140→150→160 en cascada
+- **Versiones DAO no disponibles** → intenta 160→150→140→120→36 en cascada
 
 ---
 
 ## Pruebas mínimas
 
-- `New-Sandbox` → archivo copiado, tamaño > 0, SHA256 distinto al fuente (por el copy)
+- `New-Sandbox` → archivo copiado, tamaño > 0, tamaño igual al fuente (copia bit-a-bit)
 - `Discover-LinkedTables` sobre sandbox sin vínculos → array vacío
 - `Discover-LinkedTables` sobre sandbox con vínculos → array con n elementos `{TableName, Connect, SourceTable}`
 - `Make-Sidecar` → archivo generado, `OpenDatabase` sin password exitoso

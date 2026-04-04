@@ -487,7 +487,7 @@ function Make-Sidecar {
             $destDbNew = $destEngine.CreateDatabase($tmpMdb, $destLocale, $dbVersion)
             $destDbNew.Close()
         } finally {
-            Close-DaoObjects -Objects @($destEngine)
+            Close-DaoObjects -Objects @($destDbNew, $destEngine)
         }
 
         # Now open the newly created DB and copy all tables
@@ -518,7 +518,8 @@ function Make-Sidecar {
             }
 
         } finally {
-            # BUG O FIX: Removed $destDb2.Close() — FinalReleaseComObject internally calls Close()
+            # .Close() antes de FinalReleaseComObject — necesario para flush de writes y liberar file lock
+            if ($destDb2) { try { $destDb2.Close() } catch {} }
             Close-DaoObjects -Objects @($destDb2, $destEngine2)
         }
 
@@ -531,7 +532,8 @@ function Make-Sidecar {
         return $sidecarPath
 
     } finally {
-        # BUG O FIX: Removed $srcDb.Close() — FinalReleaseComObject internally calls Close()
+        # .Close() antes de FinalReleaseComObject — necesario para flush de writes y liberar file lock
+        if ($srcDb) { try { $srcDb.Close() } catch {} }
         Close-DaoObjects -Objects @($srcDb, $srcEngine)
     }
 }
@@ -689,7 +691,8 @@ function Localize-Sandbox {
                 }
 
             } finally {
-                # BUG O FIX: Removed $srcDb.Close() — FinalReleaseComObject internally calls Close()
+                # .Close() antes de FinalReleaseComObject — necesario para flush de writes y liberar file lock
+                if ($srcDb) { try { $srcDb.Close() } catch {} }
                 Close-DaoObjects -Objects @($srcDb, $srcEngine)
             }
         }
@@ -728,9 +731,8 @@ function Localize-Sandbox {
         Write-Status -Message "OK Sandbox localizeado exitosamente" -Color Green
 
     } finally {
-        # Cleanup final — asegurar que todo se libere incluso si hay errores
-        # BUG 5 FIX: No longer using Access COM session — removed Close-AccessSession
-        # BUG O FIX: Removed $db.Close() — FinalReleaseComObject internally calls Close()
+        # .Close() antes de FinalReleaseComObject — necesario para flush de writes y liberar file lock antes del compact
+        if ($db) { try { $db.Close() } catch {} }
         Close-DaoObjects -Objects @($db, $daoEngine)
         [System.GC]::Collect()
         [System.GC]::WaitForPendingFinalizers()
