@@ -1,10 +1,10 @@
-# access-sandbox — Provisioning de Workspaces Access Locales
+# access-localize — Conversión de Tablas Vinculadas Access a Locales
 
-Skill agnóstico para preparar un workspace Access local y autocontenido a partir de un backend fuente.
-Sin rutas hardcodeadas, sin código específico de proyecto.
+Convierte todas las tablas vinculadas de un frontend Access en tablas locales reales,
+eliminando dependencias de backends externos. El frontend queda autocontenido.
 
-> **Rol:** Esta skill *prepara* el sandbox. Para leer, consultar o modificar datos dentro del sandbox,
-> usar **`access-query`** sobre el sandbox ya localizeado.
+> **Rol:** Esta skill *localiza* un frontend. Para crear sandboxes desde backends, usar **`access-sandbox`**.
+> Para consultar o modificar datos, usar **`access-query`**.
 
 ---
 
@@ -12,8 +12,8 @@ Sin rutas hardcodeadas, sin código específico de proyecto.
 
 | Archivo | Descripción |
 |---|---|
-| `SandboxManager.ps1` | Motor de provisioning (PowerShell) |
-| `SKILL.md` | Especificación técnica completa (referencia canonical) |
+| `ConvertLinkedAccessTablesToLocal.ps1` | Motor de conversión (PowerShell) |
+| `SKILL.md` | Especificación técnica completa (referencia canónica) |
 | `README.md` | Este archivo — guía de uso rápida |
 
 ---
@@ -21,313 +21,175 @@ Sin rutas hardcodeadas, sin código específico de proyecto.
 ## Quick start
 
 ```powershell
-# Invocación directa (ruta absoluta al script)
-& "C:\Users\adm\.config\opencode\.agent\skills\access-sandbox\SandboxManager.ps1" `
-    -Action New-Sandbox `
-    -SourceBackend "C:\proyecto\datos\MiBackend.accdb" `
-    -SandboxPath "C:\sandbox\MiBackend.accdb"
+# Caso típico — frontend con password, backends con password en Connect
+& "C:\Users\adm\.config\opencode\.agents\skills\access-localize\ConvertLinkedAccessTablesToLocal.ps1" `
+    -FrontendPath "C:\proyecto\MiApp_Gestion.accdb" `
+    -FrontendPassword "dpddpd"
 ```
+
+**Resultado:** Todas las tablas que antes eran vínculos a backends externos son ahora tablas locales con datos copiados. El frontend funciona sin acceso a los backends.
 
 ---
 
-## Acciones disponibles
-
-### 1. New-Sandbox
-
-Copia un backend fuente a una ruta de sandbox.
-
-```powershell
--Action New-Sandbox
--SourceBackend "C:\proyecto\datos\Backend.accdb"
--SandboxPath "C:\sandbox\Backend.accdb"
-```
-
-**No usa COM** — `Copy-Item` directo (más rápido y seguro para crear la copia inicial).
-
----
-
-### 2. Discover-LinkedTables
-
-Abre el sandbox headless y retorna las tablas vinculadas.
-
-```powershell
--Action Discover-LinkedTables
--SandboxPath "C:\sandbox\Backend.accdb"
-```
-
-**Retorna array de objetos** (pipeline output):
-
-```powershell
-TableName    : tblContratos
-Connect      : ;DATABASE=C:\proyecto\datos\Backend.accdb
-SourceTable  : tblContratos
-IsLinked     : True
-SourcePath   : C:\proyecto\datos\Backend.accdb
-```
-
----
-
-### 3. Make-Sidecar
-
-Crea una copia sin password de un backend protegido. Útil cuando `Localize-Sandbox` necesita acceder a datos protegidos.
-
-```powershell
--Action Make-Sidecar
--SourceBackend "C:\proyecto\datos\Backend_protegido.accdb"
--Password "secret"
--SidecarSuffix "_nopass"   # genera Backend_protegido_nopass.accdb
-```
-
-**Genera:** `C:\proyecto\datos\Backend_protegido_nopass.accdb`
-
----
-
-### 4. Localize-Sandbox
-
-Reemplaza todas las tablas vinculadas en el sandbox con tablas locales (datos copiados desde el source).
-
-```powershell
-# Single-backend: usando sidecar (sin password)
--Action Localize-Sandbox
--SandboxPath "C:\sandbox\Backend.accdb"
--SourceSidecar "C:\proyecto\datos\Backend_nopass.accdb"
-
-# Multi-backend: mapa de sidecars por backend
-$map = @{
-    "C:\proyecto\datos\Backend1.accdb" = "C:\proyecto\datos\Backend1_nopass.accdb"
-    "C:\proyecto\datos\Backend2.accdb" = "C:\proyecto\datos\Backend2_nopass.accdb"
-} | ConvertTo-Json -Compress
-
--Action Localize-Sandbox
--SandboxPath "C:\sandbox\Backend.accdb"
--BackendSidecarMapJson $map
-
-# O usando backend protegido directamente (single-backend)
--Action Localize-Sandbox
--SandboxPath "C:\sandbox\Backend.accdb"
--SourceBackend "C:\proyecto\datos\Backend.accdb"
--Password "secret"
-```
-
----
-
-## Flujo de 3 etapas: sandbox → access-query → ERD
-
-Esta es la narrativa completa que cubre los tres propósitos del skill.
-
-### Preparación de entorno
-
-```
-PROYECTO      = C:\MiProyecto
-BACKEND_ORIG  = C:\MiProyecto\datos\MiApp_Datos.accdb  (protegido con password)
-FRONTEND      = C:\MiProyecto\MiApp.accdb
-SANDBOX       = C:\Sandbox\MiApp_Datos.accdb
-SIDECAR       = C:\MiProyecto\datos\MiApp_Datos_nopass.accdb
-```
-
-#### Etapa 1 — Crear y localize el sandbox
-
-```powershell
-# --- Paso 1: Copiar backend protegido a sandbox ---
-& "C:\Users\adm\.config\opencode\.agent\skills\access-sandbox\SandboxManager.ps1" `
-    -Action New-Sandbox `
-    -SourceBackend "C:\MiProyecto\datos\MiApp_Datos.accdb" `
-    -SandboxPath "C:\Sandbox\MiApp_Datos.accdb"
-
-# --- Paso 2: Crear sidecar sin password (permite localize sin tocar el protegido) ---
-& "C:\Users\adm\.config\opencode\.agent\skills\access-sandbox\SandboxManager.ps1" `
-    -Action Make-Sidecar `
-    -SourceBackend "C:\MiProyecto\datos\MiApp_Datos.accdb" `
-    -Password "secret" `
-    -SidecarSuffix "_nopass"
-
-# --- Paso 3: Localizar sandbox (reemplazar vínculos con tablas locales) ---
-& "C:\Users\adm\.config\opencode\.agent\skills\access-sandbox\SandboxManager.ps1" `
-    -Action Localize-Sandbox `
-    -SandboxPath "C:\Sandbox\MiApp_Datos.accdb" `
-    -SourceSidecar "C:\MiProyecto\datos\MiApp_Datos_nopass.accdb"
-
-# --- Verificación: confirmar que no quedan vínculos ---
-$linked = & "C:\Users\adm\.config\opencode\.agent\skills\access-sandbox\SandboxManager.ps1" `
-    -Action Discover-LinkedTables `
-    -SandboxPath "C:\Sandbox\MiApp_Datos.accdb"
-
-# Debería retornar array vacío
-```
-
-**Resultado:** `C:\Sandbox\MiApp_Datos.accdb` es una copia 100% autónoma del backend original,
-sin vínculos externos, sin password.
-
----
-
-#### Etapa 2 — Operar con access-query sobre el sandbox
-
-```powershell
-# Configurar password vacía para el sandbox (no tiene password)
-$env:ACCESS_QUERY_PASSWORD = ""
-
-# Consultar datos (lectura)
-.\query-backend.ps1 -BackendPath "C:\Sandbox\MiApp_Datos.accdb" `
-    -SQL "SELECT TOP 10 * FROM TbSolicitudes WHERE Estado = 'PENDIENTE'"
-
-# Listar tablas y esquemas
-.\query-backend.ps1 -BackendPath "C:\Sandbox\MiApp_Datos.accdb" -ListTables
-.\query-backend.ps1 -BackendPath "C:\Sandbox\MiApp_Datos.accdb" -GetSchema -Table "TbSolicitudes"
-
-# Seed de datos de test
-.\query-backend.ps1 -BackendPath "C:\Sandbox\MiApp_Datos.accdb" `
-    -Seed -AllowTable "TbSolicitudes" -FixtureTag "ERD_VERIFY" `
-    -Exec "INSERT INTO TbSolicitudes (ID, Ref, Estado) VALUES (99901, 'TEST_ERD_01', 'PENDIENTE')"
-
-# Cleanup después de verificar
-.\query-backend.ps1 -BackendPath "C:\Sandbox\MiApp_Datos.accdb" `
-    -Teardown -AllowTable "TbSolicitudes" -FixtureTag "ERD_VERIFY" `
-    -Exec "DELETE FROM TbSolicitudes WHERE ID = 99901"
-```
-
-> `access-query` opera sobre **cualquier** backend (original o sandbox). Al apuntar al sandbox,
-> todas las operaciones son seguras y no afectan al sistema real.
-
----
-
-#### Etapa 3 — Generar ERD desde el sandbox
-
-```powershell
-# El sandbox ya es un ACCDB local, autocontenido, sin vínculos.
-# Cualquier herramienta de generación de ERD puede apuntar directamente a él.
-
-& ".\tools\Generar-ERD.ps1" `
-    -BackendPath "C:\Sandbox\MiApp_Datos.accdb" `
-    -Output "C:\Sandbox\ERD_MiApp.html"
-
-# O con Access COM directamente (ejemplo conceptual):
-$access = New-Object -ComObject Access.Application
-$access.OpenCurrentDatabase("C:\Sandbox\MiApp_Datos.accdb", $false, "")
-# ... usar DAO para extraer TableDefs y relationships ...
-$access.CloseCurrentDatabase()
-$access.Quit()
-```
-
-**Beneficio clave:** El ERD se genera desde datos reales (copiados al localize) y esquema completo,
-pero sin tocar jamás el backend protegido original.
-
----
-
-## Ejemplo multi-backend
-
-Cuando un frontend tiene tablas vinculadas a **múltiples backends externos**, el localize requiere un mapa de sidecars:
-
-```powershell
-$networkRoot = "\\servidor\share\MiApp"
-$localSandbox = "C:\sandboxes\MiApp\MiApp_datos.accdb"
-$sidecarRoot = "C:\sandboxes\MiApp\sidecars"
-
-# Mapa: cada backend externo → su sidecar sin password
-$backendMap = @{
-    "$networkRoot\Backend_A.accdb" = "$sidecarRoot\Backend_A_nopass.accdb"
-    "$networkRoot\Backend_B.accdb" = "$sidecarRoot\Backend_B_nopass.accdb"
-    "$networkRoot\Backend_C.accdb" = "$sidecarRoot\Backend_C_nopass.accdb"
-}
-
-# 1. Copiar backend principal a sandbox
-& ".agent/skills/access-sandbox/SandboxManager.ps1" `
-    -Action New-Sandbox `
-    -SourceBackend "$networkRoot\MiApp_datos.accdb" `
-    -SandboxPath $localSandbox
-
-# 2. Crear sidecar sin password para cada backend (hashtable directo)
-foreach ($src in $backendMap.Keys) {
-    & ".agent/skills/access-sandbox/SandboxManager.ps1" `
-        -Action Make-Sidecar `
-        -SourceBackend $src `
-        -Password "mipassword" `
-        -SidecarSuffix "_nopass"
-}
-
-# 3. Localizar sandbox (convertir hashtable a JSON SOLO para el parámetro)
-& ".agent/skills/access-sandbox/SandboxManager.ps1" `
-    -Action Localize-Sandbox `
-    -SandboxPath $localSandbox `
-    -BackendSidecarMapJson ($backendMap | ConvertTo-Json -Compress)
-```
-
----
-
-## Parámetros comunes
+## Parámetros
 
 | Parámetro | Default | Descripción |
 |---|---|---|
-| `-Action` | (requerido) | `New-Sandbox` \| `Discover-LinkedTables` \| `Make-Sidecar` \| `Localize-Sandbox` |
-| `-SourceBackend` | | Ruta al backend fuente |
-| `-SandboxPath` | | Ruta del sandbox destino |
-| `-Password` | `""` | Password del backend protegido |
-| `-SidecarSuffix` | `_nopass` | Sufijo para archivos sidecar |
-| `-BackendSidecarMapJson` | | JSON hashtable `{SourceBackend -> SidecarPath}` para multi-backend |
-| `-SourceSidecar` | | Ruta al sidecar (para localize sin password) |
-| `-SandboxPassword` | `""` | Password del sandbox (si tiene) |
-| `-WhatIf` | | Simula sin escribir |
-| `-Verbose` | | Salida detallada |
+| `-FrontendPath` | (requerido) | Ruta absoluta al frontend `.accdb` |
+| `-FrontendPassword` | `""` | Contraseña del frontend |
+| `-KeepCopiedBackends` | `$false` | No eliminar sidecars al finalizar |
+| `-CleanPreviousSidecars` | `$false` | Limpiar sidecars huérfanos antes de empezar |
+| `-BackupFolder` | `""` | Carpeta alternativa para el backup |
+
+> **No hay `-BackendPassword`**: la contraseña de cada backend se extrae automáticamente de
+> `TableDef.Connect` de las tablas vinculadas.
+
+---
+
+## Qué hace internamente
+
+```
+Frontend.accdb                      Backend_A.accdb    Backend_B.accdb
+┌──────────────────┐                ┌──────────────┐   ┌──────────────┐
+│ tblClientes ──────────────────────│► tblClientes │   │              │
+│ tblPedidos ───────────────────────│► tblPedidos  │   │              │
+│ tblProductos ─────────────────────│──────────────│───│► tblProductos│
+└──────────────────┘                └──────────────┘   └──────────────┘
+
+                            ▼  access-localize  ▼
+
+Frontend.accdb (localizado)
+┌──────────────────┐
+│ tblClientes      │  ← tabla local con datos copiados
+│ tblPedidos       │  ← tabla local con datos copiados
+│ tblProductos     │  ← tabla local con datos copiados
+└──────────────────┘
+   Sin vínculos externos
+```
+
+### Pipeline por tabla
+
+1. Abre backend vía DAO → lee definición de la tabla origen
+2. Crea tabla local temporal campo a campo (preserva tipos, AutoNumber, propiedades)
+3. Crea vínculo temporal al sidecar
+4. `INSERT INTO ... SELECT ...` con lista explícita de campos (preserva AutoNumber)
+5. Valida conteo de registros
+6. Recrea índices y PK desde el origen
+7. Elimina la vinculada original → renombra la temporal al nombre final
+
+---
+
+## Ejemplos
+
+### Caso básico
+
+```powershell
+& ".agents\skills\access-localize\ConvertLinkedAccessTablesToLocal.ps1" `
+    -FrontendPath "C:\proyecto\MiApp_Gestion.accdb" `
+    -FrontendPassword "dpddpd"
+```
+
+### Con backup en carpeta separada
+
+```powershell
+& ".agents\skills\access-localize\ConvertLinkedAccessTablesToLocal.ps1" `
+    -FrontendPath "C:\proyecto\MiApp_Gestion.accdb" `
+    -FrontendPassword "dpddpd" `
+    -BackupFolder "D:\backups\access"
+```
+
+### Limpiar sidecars de ejecución previa fallida
+
+```powershell
+& ".agents\skills\access-localize\ConvertLinkedAccessTablesToLocal.ps1" `
+    -FrontendPath "C:\proyecto\MiApp_Gestion.accdb" `
+    -FrontendPassword "dpddpd" `
+    -CleanPreviousSidecars
+```
+
+### Conservar sidecars para inspección
+
+```powershell
+& ".agents\skills\access-localize\ConvertLinkedAccessTablesToLocal.ps1" `
+    -FrontendPath "C:\proyecto\MiApp_Gestion.accdb" `
+    -FrontendPassword "dpddpd" `
+    -KeepCopiedBackends
+```
+
+---
+
+## Seguridad y consistencia
+
+- **Backup obligatorio** antes de cualquier modificación. Nombre: `Frontend__backup__yyyyMMdd_HHmmss.accdb`
+- **Sustitución atómica**: la tabla vinculada original solo se elimina cuando la local temporal está completa y validada
+- **Proceso oculto**: `Access.Application` con `Visible=$false`, `UserControl=$false`, `AutomationSecurity=1`
+- **AutoExec/StartupForm deshabilitados** temporalmente durante la operación y restaurados al final
+- **Kill de seguridad**: si el proceso COM de Access no se cierra limpiamente, se mata por PID
+
+---
+
+## Preservación de estructura
+
+| Se preserva | No se preserva (esta versión) |
+|---|---|
+| Tipos de campo (incluido AutoNumber con valores) | Relaciones (Relations) entre tablas |
+| Tamaño, Attributes, Required, AllowZeroLength | Propiedades avanzadas no portables |
+| DefaultValue, ValidationRule, ValidationText | Vínculos a orígenes no-Access |
+| Description | |
+| Índices: PK, Unique, IgnoreNulls, Clustered | |
+
+---
+
+## Gestión de errores
+
+| Tipo | Comportamiento |
+|---|---|
+| Frontend no existe / backup falla / DAO no disponible | **Aborta** — no se modifica nada |
+| Backend referenciado no accesible | **Aborta** — backup disponible |
+| Tabla individual falla (creación/datos/índices) | **Aborta** — tablas ya procesadas quedan bien, las no procesadas quedan como vínculos |
+| Propiedad de campo individual no portable | **Continúa** — se registra y se salta |
+
+En caso de error, el backup siempre está disponible y los sidecars se conservan para diagnóstico.
+
+---
+
+## Flujo combinado con otras skills
+
+```powershell
+# 1. Localizar el frontend (esta skill)
+& ".agents\skills\access-localize\ConvertLinkedAccessTablesToLocal.ps1" `
+    -FrontendPath "C:\proyecto\MiApp_Gestion.accdb" `
+    -FrontendPassword "dpddpd"
+
+# 2. Consultar datos del frontend ya localizado (access-query)
+& ".agents\skills\access-query\query-backend.ps1" `
+    -BackendPath "C:\proyecto\MiApp_Gestion.accdb" `
+    -Password "dpddpd" `
+    -SQL "SELECT COUNT(*) FROM tblClientes"
+
+# 3. Generar ERD desde el frontend localizado
+& ".agents\skills\access-query\query-backend.ps1" `
+    -BackendPath "C:\proyecto\MiApp_Gestion.accdb" `
+    -Password "dpddpd" `
+    -ListTables
+```
 
 ---
 
 ## Notas de implementación
 
-- **DAO puro**: Las acciones usan `DAO.DBEngine` directamente, sin instanciar `Access.Application` — no hay ventanas, prompts ni diálogos
-- **COM cleanup**: usa `FinalReleaseComObject` + `GC.Collect()` + `GC.WaitForPendingFinalizers()` para limpieza determinística
+- **Enfoque híbrido**: DAO para estructura + `INSERT INTO...SELECT` para datos (no usa `SELECT INTO` ni recordset fila a fila)
+- **AutoNumber**: se preservan valores originales incluyendo el campo explícitamente en `INSERT INTO...SELECT`
+- **COM cleanup**: `FinalReleaseComObject` + una sola pasada de `GC.Collect()` + `GaitForPendingFinalizers()` en los puntos de cierre
 - **DAO versions**: intenta 160 → 150 → 140 → 120 → 36 en cascada
-- **Compact**: `Localize-Sandbox` compacts la BD al final para limpiar espacio
-- **`Open-AccessSession`**: Helper disponible pero no usado por ninguna acción actual. Configura `Visible=$false`, `UserControl=$false`, `AutomationSecurity=1`, `SetWarnings=$false` para operaciones que requieran Access COM
-
----
-
-## Flujo unattended (100% PowerShell, sin prompts)
-
-El `Localize-Sandbox` es **completamente unattended** — ningún diálogo de Access, confirmación o input de usuario. Todas las operaciones usan DAO puro (`DAO.DBEngine`) que corre in-process dentro de PowerShell sin lanzar `MSACCESS.EXE`.
-
-> **`Open-AccessSession` / `Close-AccessSession`** están definidos en el script pero **no se invocan en ninguna acción**. Existen como helpers para casos que requieran `Access.Application` (macros, DoCmd).
-
-### Cómo ejecutar Localize-Sandbox sin prompts
-
-```powershell
-# Flujo completo sin password (sandboxes sin protección)
-& "C:\Users\adm\.config\opencode\.agent\skills\access-sandbox\SandboxManager.ps1" `
-    -Action Localize-Sandbox `
-    -SandboxPath "C:\sandbox\MiApp_Datos.accdb" `
-    -SourceSidecar "C:\proyecto\datos\MiApp_Datos_nopass.accdb"
-
-# Con passwords — también unattended, solo pasar los parámetros
-& "C:\Users\adm\.config\opencode\.agent\skills\access-sandbox\SandboxManager.ps1" `
-    -Action Localize-Sandbox `
-    -SandboxPath "C:\sandbox\MiApp_Datos.accdb" `
-    -SourceBackend "C:\proyecto\datos\MiApp_Datos.accdb" `
-    -Password "dpddpd" `
-    -SandboxPassword "sandbox_secret"
-```
-
-> **Nota:** El path VBA/macro (usar `CurrentDb` desde macros AutoExec o módulos VBA para
-> localize) está **DEPRECADO**. El flujo PowerShell con DAO puro es el único
-> camino soportado a partir de esta versión. No editar código VBA para localize.
-
----
-
-## Relación con access-query
-
-| Skill | access-sandbox | access-query |
-|---|---|---|
-| **Propósito** | Preparar un workspace local | Leer, consultar, modificar datos |
-| **Operaciones** | New-Sandbox, Make-Sidecar, Localize-Sandbox | -SQL, -Exec, -Seed, -Teardown |
-| **¿Modifica datos reales?** | No — solo crea archivos | Sí — pero en el target que se le pase |
-| **Target natural** | Backend protegido → sandbox | Sandbox → consultas y fixtures |
-
-**Flujo típico:**
-1. `access-sandbox` crea y localize el sandbox
-2. `access-query` opera sobre el sandbox (read/query/seed/teardown)
-3. Una herramienta de ERD genera diagramas desde el sandbox
+- **Sidecars**: copias temporales de los backends junto al frontend, nombradas `Frontend__sidecar__Backend.accdb`
+- **P/Invoke**: usa `GetWindowThreadProcessId` para capturar el PID de `MSACCESS.EXE` y poder matarlo si no se cierra limpiamente
 
 ---
 
 ## Requisitos
 
-- Windows con Microsoft Access instalado
+- Windows con Microsoft Access instalado (necesita `Access.Application` COM, no basta Access Database Engine)
 - PowerShell 5.1+ o PowerShell 7+
-- Permisos de lectura/escritura en las rutas especificadas
+- Permisos de lectura en los backends origen
+- Permisos de escritura en la carpeta del frontend
