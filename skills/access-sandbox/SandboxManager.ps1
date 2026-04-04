@@ -50,20 +50,18 @@ function Write-Status {
     }
 }
 
-function Test-AccessInstalled {
-    $access = $null
+# Verifica que DAO.DBEngine esté disponible (DLL in-process, sin MSACCESS.EXE)
+# Esto es más preciso que Test-AccessInstalled porque DAO.DBEngine viene con
+# el Access Database Engine Redistributable (sin Access completo instalado)
+function Test-DaoAvailable {
     try {
-        $access = New-Object -ComObject Access.Application
+        $engine = New-DaoDbEngine
+        [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($engine) | Out-Null
+        [System.GC]::Collect()
+        [System.GC]::WaitForPendingFinalizers()
         return $true
     } catch {
         return $false
-    } finally {
-        if ($access) {
-            try { $access.Quit() } catch {}
-            try { [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($access) | Out-Null } catch {}
-        }
-        [System.GC]::Collect()
-        [System.GC]::WaitForPendingFinalizers()
     }
 }
 
@@ -360,6 +358,7 @@ function Copy-TableData {
         }
 
     } finally {
+        if ($sourceDbObj) { try { $sourceDbObj.Close() } catch {} }
         Close-DaoObjects -Objects @($sourceDbObj, $sourceEngine)
     }
 }
@@ -547,7 +546,7 @@ function Localize-Sandbox {
         [string]$SandboxPassword = "",
         
         # BUG 4 FIX: Hashtable for multi-backend scenario
-        # Maps source backend path -> sidecar path (e.g., for CONDOR's 3 external backends)
+        # Maps source backend path -> sidecar path (e.g., for projects with multiple external backends)
         [hashtable]$BackendSidecarMap = $null
     )
 
@@ -743,8 +742,8 @@ function Localize-Sandbox {
 # VALIDATION
 # ============================================================
 
-if (-not (Test-AccessInstalled)) {
-    throw "CRITICAL: Microsoft Access no está instalado o no se pudo inicializar COM."
+if (-not (Test-DaoAvailable)) {
+    throw "CRITICAL: DAO.DBEngine no disponible. Verificar que Microsoft Access o Access Database Engine esté instalado."
 }
 
 # ============================================================

@@ -282,20 +282,9 @@ foreach ($src in $backendMap.Keys) {
 
 ## Flujo unattended (100% PowerShell, sin prompts)
 
-El `Localize-Sandbox` es **completamente unattended** — ningún diálogo de Access, confirmación o input de usuario.
+El `Localize-Sandbox` es **completamente unattended** — ningún diálogo de Access, confirmación o input de usuario. Todas las operaciones usan DAO puro (`DAO.DBEngine`) que corre in-process dentro de PowerShell sin lanzar `MSACCESS.EXE`.
 
-### Helpers canonicales (pattern de VBAManager.ps1)
-
-```powershell
-# Abrir session — configura Visible=$false, UserControl=$false,
-#                 AutomationSecurity=1, SetWarnings=$false
-$session = Open-AccessSession -AccessPath $SandboxPath -Password $SandboxPassword
-
-# ... operaciones sobre la BD abierta ...
-
-# Cerrar session — CloseCurrentDatabase + Quit + FinalReleaseComObject + GC
-Close-AccessSession -Session $session
-```
+> **`Open-AccessSession` / `Close-AccessSession`** están definidos en el script pero **no se invocan en ninguna acción**. Existen como helpers para casos que requieran `Access.Application` (macros, DoCmd).
 
 ### Cómo ejecutar Localize-Sandbox sin prompts
 

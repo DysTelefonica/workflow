@@ -26,7 +26,7 @@
 - **Windows** con Microsoft Access instalado (COM + DAO)
 - **PowerShell 5.1+** (o PowerShell 7+)
 - La BD fuente (backend) debe estar **cerrada** antes de invocar el script
-- El script abre Access en modo **headless** (invisible, sin UserControl)
+- El script usa `DAO.DBEngine` directamente (sin instanciar `Access.Application`) — no hay ventanas ni procesos visibles
 - Acceso a `DAO.DBEngine` (versiones 120/140/150/160 compatibles)
 
 ---
@@ -285,7 +285,7 @@ El resultado es un ERD del esquema completo sin haber tocado `MiApp_Datos.accdb`
 - **Backend protegido sin sidecar** → `Localize-Sandbox` necesita `-SourceSidecar` o fallará
 - **Sandbox ya localizeado** → `Discover-LinkedTables` retornará vacío (sin vínculos)
 - **Backend fuente bloqueado por otro proceso** → error claro con path del proceso bloqueante
-- **ACCESS NO instalado** → el script valida `New-Object -ComObject Access.Application` al inicio y muere con error legible
+- **DAO no disponible** → el script valida `New-DaoDbEngine` al inicio y muere con error legible (no requiere Access completo — funciona con Access Database Engine Redistributable)
 - **Versiones DAO no disponibles** → intenta 160→150→140→120→36 en cascada
 
 ---
