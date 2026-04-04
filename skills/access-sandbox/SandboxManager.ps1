@@ -51,11 +51,19 @@ function Write-Status {
 }
 
 function Test-AccessInstalled {
+    $access = $null
     try {
-        $null = New-Object -ComObject Access.Application
+        $access = New-Object -ComObject Access.Application
         return $true
     } catch {
         return $false
+    } finally {
+        if ($access) {
+            try { $access.Quit() } catch {}
+            try { [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($access) | Out-Null } catch {}
+        }
+        [System.GC]::Collect()
+        [System.GC]::WaitForPendingFinalizers()
     }
 }
 
@@ -282,7 +290,7 @@ function Get-TableDefs {
 
 function Copy-TableData {
     Param(
-        [Parameter(Mandatory = $true)]$SourceDb,
+        [Parameter(Mandatory = $true)]$SourcePath,
         [Parameter(Mandatory = $true)]$DestDb,
         [Parameter(Mandatory = $true)][string]$TableName,
         [string]$Password = ""
@@ -296,7 +304,7 @@ function Copy-TableData {
     try {
         $sourceEngine = New-DaoDbEngine
         $sourceConnect = if ($Password) { ";PWD=$Password" } else { "" }
-        $sourceDbObj = $sourceEngine.OpenDatabase($SourceDb, $false, $false, $sourceConnect)
+        $sourceDbObj = $sourceEngine.OpenDatabase($SourcePath, $false, $false, $sourceConnect)
         $sourceConn = $sourceDbObj.TableDefs[$TableName]
 
         if (-not $sourceConn) {
@@ -304,7 +312,7 @@ function Copy-TableData {
             return
         }
 
-        # Get field definitions from source
+        # Get field definitions from source (BUG N FIX: preserve Attributes for AutoNumber/Required)
         $fields = @()
         for ($j = 0; $j -lt $sourceConn.Fields.Count; $j++) {
             $f = $sourceConn.Fields[$j]
@@ -312,6 +320,7 @@ function Copy-TableData {
                 Name = $f.Name
                 Type = $f.Type
                 Size = $f.Size
+                Attributes = $f.Attributes  # BUG N FIX: preserve AutoNumber, Required, etc.
             }
         }
 
@@ -321,6 +330,7 @@ function Copy-TableData {
         foreach ($fieldDef in $fields) {
             try {
                 $newField = $destTd.CreateField($fieldDef.Name, $fieldDef.Type, $fieldDef.Size)
+                $newField.Attributes = $fieldDef.Attributes  # BUG N FIX: restore Attributes
                 $destTd.Fields.Append($newField)
             } catch {
                 Write-Status -Message "WARNING: No se pudo crear campo '$($fieldDef.Name)': $($_.Exception.Message)" -Color Yellow
@@ -490,74 +500,25 @@ function Make-Sidecar {
             $destDb2 = $destEngine2.OpenDatabase($tmpMdb, $false, $false, "")
 
             foreach ($tbl in $allTables) {
-                if ($tbl.Name -match "^MSys" -or $tbl.Name -match "^~") { continue }
+                # BUG G FIX: Use $tbl.TableName instead of $tbl.Name (which is always $null)
+                if ($tbl.TableName -match "^MSys" -or $tbl.TableName -match "^~") { continue }
 
                 Write-Status -Message "  Copiando tabla: $($tbl.TableName)..." -Color Gray
 
                 if ($tbl.IsLinked) {
-                    # For linked tables: recreate as local table with data from the linked source
-                    $sourcePath = $tbl.SourcePath
-                    if (-not (Test-Path -Path $sourcePath)) {
-                        Write-Status -Message "    WARNING: Source de vínculo no encontrado: $sourcePath" -Color Yellow
-                        continue
-                    }
-
-                    # Open the linked source directly
-                    $linkEngine = New-DaoDbEngine
-                    $linkConnect = if ($Password) { ";PWD=$Password" } else { "" }
-                    $linkDb = $linkEngine.OpenDatabase($sourcePath, $false, $false, $linkConnect)
-                    try {
-                        $srcTable = $linkDb.TableDefs[$tbl.SourceTable]
-                        if (-not $srcTable) {
-                            Write-Status -Message "    WARNING: Tabla origen '$($tbl.SourceTable)' no encontrada en $sourcePath" -Color Yellow
-                            continue
-                        }
-
-                        # Copy table definition
-                        $newTd = $destDb2.CreateTableDef($tbl.TableName)
-
-                        for ($f = 0; $f -lt $srcTable.Fields.Count; $f++) {
-                            $field = $srcTable.Fields[$f]
-                            try {
-                                $newField = $newTd.CreateField($field.Name, $field.Type, $field.Size)
-                                $newTd.Fields.Append($newField)
-                            } catch {
-                                Write-Status -Message "    WARNING: Campo '$($field.Name)' saltado: $($_.Exception.Message)" -Color Yellow
-                            }
-                        }
-
-                        $destDb2.TableDefs.Append($newTd)
-
-                        # Copy data
-                        $srcRs = $linkDb.OpenRecordset($tbl.SourceTable, 1)  # dbOpenTable
-                        $destRs = $destDb2.OpenRecordset($tbl.TableName, 2)    # dbOpenDynaset
-                        try
-                        {
-                            while (-not $srcRs.EOF) {
-                                $destRs.AddNew
-                                for ($k = 0; $k -lt $srcRs.Fields.Count; $k++) {
-                                    try { $destRs.Fields[$k].Value = $srcRs.Fields[$k].Value } catch {}
-                                }
-                                $destRs.Update
-                                $srcRs.MoveNext
-                            }
-                        } finally {
-                            $srcRs.Close()
-                            $destRs.Close()
-                        }
-
-                    } finally {
-                        $linkDb.Close()
-                        Close-DaoObjects -Objects @($linkDb, $linkEngine)
-                    }
+                    # BUG B FIX: Linked tables are skipped in sidecar creation
+                    # The sidecar only contains local tables from the source backend.
+                    # External linked backends are NOT opened (each may have different passwords).
+                    Write-Status -Message "    SKIP: Tabla vinculada '$($tbl.TableName)' no se incluye en sidecar (requeriría acceso a backend externo)" -Color Yellow
+                    continue
                 } else {
                     # Local table: copy directly from source
-                    Copy-TableData -SourceDb $SourceBackend -DestDb $destDb2 -TableName $tbl.TableName -Password $Password
+                    Copy-TableData -SourcePath $SourceBackend -DestDb $destDb2 -TableName $tbl.TableName -Password $Password
                 }
             }
 
         } finally {
-            if ($destDb2) { try { $destDb2.Close() } catch {} }
+            # BUG O FIX: Removed $destDb2.Close() — FinalReleaseComObject internally calls Close()
             Close-DaoObjects -Objects @($destDb2, $destEngine2)
         }
 
@@ -570,7 +531,7 @@ function Make-Sidecar {
         return $sidecarPath
 
     } finally {
-        if ($srcDb) { try { $srcDb.Close() } catch {} }
+        # BUG O FIX: Removed $srcDb.Close() — FinalReleaseComObject internally calls Close()
         Close-DaoObjects -Objects @($srcDb, $srcEngine)
     }
 }
@@ -676,7 +637,7 @@ function Localize-Sandbox {
                     continue
                 }
 
-                # Collect field definitions
+                # Collect field definitions (BUG N FIX: preserve Attributes for AutoNumber/Required)
                 $fieldDefs = @()
                 for ($f = 0; $f -lt $srcTableDef.Fields.Count; $f++) {
                     $field = $srcTableDef.Fields[$f]
@@ -684,6 +645,7 @@ function Localize-Sandbox {
                         Name = $field.Name
                         Type = $field.Type
                         Size = $field.Size
+                        Attributes = $field.Attributes  # BUG N FIX: preserve AutoNumber, Required, etc.
                     }
                 }
 
@@ -696,6 +658,7 @@ function Localize-Sandbox {
                 foreach ($fd in $fieldDefs) {
                     try {
                         $newField = $newTd.CreateField($fd.Name, $fd.Type, $fd.Size)
+                        $newField.Attributes = $fd.Attributes  # BUG N FIX: restore Attributes
                         $newTd.Fields.Append($newField)
                     } catch {
                         Write-Status -Message "    WARNING: Campo '$($fd.Name)' no se pudo crear: $($_.Exception.Message)" -Color Yellow
@@ -719,12 +682,14 @@ function Localize-Sandbox {
                     }
                     Write-Status -Message "    OK $($linked.TableName) localizeada" -Color Gray
                 } finally {
-                    $srcRs.Close()
-                    $destRs.Close()
+                    # BUG L FIX: Separate try-catch blocks ensure BOTH recordsets
+                    # are closed even if one throws. Empty catch suppresses errors.
+                    try { $srcRs.Close() } catch { }
+                    try { $destRs.Close() } catch { }
                 }
 
             } finally {
-                $srcDb.Close()
+                # BUG O FIX: Removed $srcDb.Close() — FinalReleaseComObject internally calls Close()
                 Close-DaoObjects -Objects @($srcDb, $srcEngine)
             }
         }
@@ -745,7 +710,8 @@ function Localize-Sandbox {
             # BUG 6 FIX: CompactDatabase signature is (srcDb, destDb, destLocale, options, password)
             # destLocale="" for dbLangGeneral, options=128 for dbVersion120 (Access 2007+ .accdb)
             $compactEngine = New-DaoDbEngine
-            $compactEngine.CompactDatabase($SandboxPath, $SandboxPath + ".tmp", "", 128, "")
+            $compactPwd = if ($SandboxPassword) { ";PWD=$SandboxPassword" } else { "" }
+            $compactEngine.CompactDatabase($SandboxPath, $SandboxPath + ".tmp", "", 128, $compactPwd)
             Close-DaoObjects -Objects @($compactEngine)
 
             [System.GC]::Collect()
@@ -755,6 +721,8 @@ function Localize-Sandbox {
 
         } catch {
             Write-Status -Message "WARNING: Compact falló: $($_.Exception.Message)" -Color Yellow
+            # BUG E/J FIX: Clean up orphaned .tmp file if Move-Item failed
+            Remove-Item -Path ($SandboxPath + ".tmp") -ErrorAction SilentlyContinue
         }
 
         Write-Status -Message "OK Sandbox localizeado exitosamente" -Color Green
@@ -762,8 +730,7 @@ function Localize-Sandbox {
     } finally {
         # Cleanup final — asegurar que todo se libere incluso si hay errores
         # BUG 5 FIX: No longer using Access COM session — removed Close-AccessSession
-        if ($db) { try { $db.Close() } catch {} }
-        if ($daoEngine) { try { $daoEngine.Close() } catch {} }
+        # BUG O FIX: Removed $db.Close() — FinalReleaseComObject internally calls Close()
         Close-DaoObjects -Objects @($db, $daoEngine)
         [System.GC]::Collect()
         [System.GC]::WaitForPendingFinalizers()
