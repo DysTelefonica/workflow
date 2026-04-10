@@ -2,7 +2,7 @@
 [CmdletBinding()]
 Param(
     [Parameter(Mandatory = $true, Position = 0)]
-    [ValidateSet("Export", "Import", "Fix-Encoding", "Generate-ERD", "Delete", "Rename", "List")]
+    [ValidateSet("Export", "Import", "Fix-Encoding", "Generate-ERD")]
     [string]$Action,
 
     [Parameter()]
@@ -33,14 +33,6 @@ Param(
 
     [Parameter()]
     [string]$ErdPath,
-
-    # NUEVO: nombre destino para Rename
-    [Parameter()]
-    [string]$NewModuleName,
-
-    # NUEVO: switch para borrar tambien de src/ en Delete
-    [Parameter()]
-    [switch]$DeleteFromSrc,
 
     [Parameter()]
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSAvoidUsingPlainTextForPassword", "Password", Justification = "Requerido por especificacion del proyecto.")]
@@ -372,11 +364,10 @@ function Resolve-ModulesPath {
     Param(
         [Parameter(Mandatory = $true)][string]$DestinationRoot,
         [Parameter(Mandatory = $true)][string]$AccessPath,
-        # FIX: ValidateSet ampliado con las nuevas acciones
-        [Parameter(Mandatory = $true)][ValidateSet("Export", "Import", "Fix-Encoding", "Generate-ERD", "Delete", "Rename", "List")][string]$Action
+        [Parameter(Mandatory = $true)][ValidateSet("Export", "Import", "Fix-Encoding", "Generate-ERD")][string]$Action
     )
     if (-not (Test-Path -Path $DestinationRoot)) {
-        if ($Action -in @("Export", "Fix-Encoding", "Delete", "Rename")) {
+        if ($Action -eq "Export" -or $Action -eq "Fix-Encoding") {
             New-Item -ItemType Directory -Force -Path $DestinationRoot | Out-Null
         } else {
             throw ("No existe la carpeta de modulos: {0}" -f $DestinationRoot)
@@ -609,18 +600,6 @@ function Get-ComponentExtension {
     return $null
 }
 
-# NUEVO: obtener nombre legible del tipo de componente
-function Get-ComponentTypeName {
-    Param([Parameter(Mandatory = $true)][int]$Type)
-    switch ($Type) {
-        1   { return "Module" }
-        2   { return "Class" }
-        3   { return "Form" }
-        100 { return "Form" }
-        default { return "Type$Type" }
-    }
-}
-
 function Export-VbaModule {
     [CmdletBinding()]
     Param(
@@ -798,29 +777,17 @@ function Import-VbaModule {
             return
         }
 
-        # FIX: .cls class modules require VBComponents.Import() to preserve metadata
-        # (VERSION 1.0 CLASS, BEGIN...END, Attribute VB_Exposed, MultiUse, etc.)
-        # CodeModule.AddFromFile() only adds code lines and strips class metadata.
-        # .bas modules work fine with AddFromFile (no special metadata).
-        $isClassModule = ($ext -eq ".cls")
-        if ($isClassModule) {
-            # Class modules: always use Import to preserve class metadata
-            try {
-                Remove-ExistingComponent -VbProject $VbProject -ModuleName $ModuleName
-            } catch {}
+        # FIX: modulos y clases — DeleteLines + AddFromFile como primera opcion
+        # Evita VBComponents.Remove() que puede disparar dialogo VBE en instancias visibles
+        try {
+            $component = $VbProject.VBComponents.Item($ModuleName)
+            $codeModule = $component.CodeModule
+            $count = $codeModule.CountOfLines
+            if ($count -gt 0) { $codeModule.DeleteLines(1, $count) }
+            $codeModule.AddFromFile($tmpAnsi)
+        } catch {
+            # El componente no existe aun — importar como nuevo (sin dialogo porque no hay nada que reemplazar)
             $VbProject.VBComponents.Import($tmpAnsi) | Out-Null
-        } else {
-            # Standard modules: DeleteLines + AddFromFile (safe for .bas)
-            try {
-                $component = $VbProject.VBComponents.Item($ModuleName)
-                $codeModule = $component.CodeModule
-                $count = $codeModule.CountOfLines
-                if ($count -gt 0) { $codeModule.DeleteLines(1, $count) }
-                $codeModule.AddFromFile($tmpAnsi)
-            } catch {
-                # El componente no existe aun — importar como nuevo (sin dialogo porque no hay nada que reemplazar)
-                $VbProject.VBComponents.Import($tmpAnsi) | Out-Null
-            }
         }
 
     } finally {
@@ -829,147 +796,6 @@ function Import-VbaModule {
             if ($obj) { try { [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($obj) | Out-Null } catch {} }
         }
     }
-}
-
-# ─── NUEVO: Delete-VbaModule ──────────────────────────────────────────
-function Delete-VbaModule {
-    [CmdletBinding()]
-    Param(
-        [Parameter(Mandatory = $true)]$VbProject,
-        [Parameter(Mandatory = $true)][string]$ModuleName,
-        $AccessApplication = $null
-    )
-
-    $component = $null
-    try {
-        $component = $VbProject.VBComponents.Item($ModuleName)
-    } catch {
-        throw ("No se encontro el modulo '{0}' en el proyecto VBA." -f $ModuleName)
-    }
-
-    $type = [int]$component.Type
-
-    try {
-        # Formularios requieren DoCmd.DeleteObject (VBComponents.Remove no funciona para forms)
-        if ($type -eq 3 -or $type -eq 100) {
-            if (-not $AccessApplication) {
-                throw "Se necesita AccessApplication para borrar formularios."
-            }
-            $formName = $ModuleName -replace '^Form_', ''
-            try { $AccessApplication.DoCmd.SetWarnings($false) } catch {}
-            # acForm = 2
-            $AccessApplication.DoCmd.DeleteObject(2, $formName)
-        } else {
-            # Modulos y clases: VBComponents.Remove
-            $VbProject.VBComponents.Remove($component)
-        }
-    } finally {
-        if ($component) {
-            try { [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($component) | Out-Null } catch {}
-        }
-    }
-}
-
-# ─── NUEVO: Rename-VbaModule ──────────────────────────────────────────
-function Rename-VbaModule {
-    [CmdletBinding()]
-    Param(
-        [Parameter(Mandatory = $true)]$VbProject,
-        [Parameter(Mandatory = $true)][string]$OldName,
-        [Parameter(Mandatory = $true)][string]$NewName,
-        $AccessApplication = $null
-    )
-
-    $component = $null
-    try {
-        $component = $VbProject.VBComponents.Item($OldName)
-    } catch {
-        throw ("No se encontro el modulo '{0}' en el proyecto VBA." -f $OldName)
-    }
-
-    $type = [int]$component.Type
-
-    try {
-        if ($type -eq 3 -or $type -eq 100) {
-            # Formularios: usar DoCmd.Rename(NuevoNombre, acForm, NombreActual)
-            if (-not $AccessApplication) {
-                throw "Se necesita AccessApplication para renombrar formularios."
-            }
-            $oldFormName = $OldName -replace '^Form_', ''
-            $newFormName = $NewName -replace '^Form_', ''
-            try { $AccessApplication.DoCmd.SetWarnings($false) } catch {}
-            # acForm = 2
-            $AccessApplication.DoCmd.Rename($newFormName, 2, $oldFormName)
-        } else {
-            # Modulos y clases: cambiar la propiedad Name directamente
-            $component.Name = $NewName
-        }
-    } finally {
-        if ($component) {
-            try { [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($component) | Out-Null } catch {}
-        }
-    }
-}
-
-# ─── NUEVO: Delete-SrcFilesForModule ──────────────────────────────────
-function Delete-SrcFilesForModule {
-    [CmdletBinding()]
-    Param(
-        [Parameter(Mandatory = $true)][string]$ModulesPath,
-        [Parameter(Mandatory = $true)][string]$ModuleName
-    )
-
-    # Buscar todos los archivos que corresponden al modulo en cualquier subcarpeta
-    $extensions = @(".form.txt", ".frm", ".cls", ".bas")
-    $subFolders = @("forms", "classes", "modules", "")
-    $deleted = 0
-
-    foreach ($folder in $subFolders) {
-        $searchPath = if ($folder) { Join-Path -Path $ModulesPath -ChildPath $folder } else { $ModulesPath }
-        if (-not (Test-Path -Path $searchPath)) { continue }
-
-        foreach ($ext in $extensions) {
-            $candidate = Join-Path -Path $searchPath -ChildPath ($ModuleName + $ext)
-            if (Test-Path -Path $candidate) {
-                Remove-Item -LiteralPath $candidate -Force
-                Write-Status -Message ("  Borrado: {0}" -f $candidate) -Color DarkYellow
-                $deleted++
-            }
-        }
-    }
-
-    return $deleted
-}
-
-# ─── NUEVO: Rename-SrcFilesForModule ─────────────────────────────────
-function Rename-SrcFilesForModule {
-    [CmdletBinding()]
-    Param(
-        [Parameter(Mandatory = $true)][string]$ModulesPath,
-        [Parameter(Mandatory = $true)][string]$OldName,
-        [Parameter(Mandatory = $true)][string]$NewName
-    )
-
-    $extensions = @(".form.txt", ".frm", ".cls", ".bas")
-    $subFolders = @("forms", "classes", "modules", "")
-    $renamed = 0
-
-    foreach ($folder in $subFolders) {
-        $searchPath = if ($folder) { Join-Path -Path $ModulesPath -ChildPath $folder } else { $ModulesPath }
-        if (-not (Test-Path -Path $searchPath)) { continue }
-
-        foreach ($ext in $extensions) {
-            $oldFile = Join-Path -Path $searchPath -ChildPath ($OldName + $ext)
-            if (Test-Path -Path $oldFile) {
-                $newFile = Join-Path -Path $searchPath -ChildPath ($NewName + $ext)
-                Rename-Item -LiteralPath $oldFile -NewName ([System.IO.Path]::GetFileName($newFile)) -Force
-                Write-Status -Message ("  Renombrado: {0} -> {1}" -f ([System.IO.Path]::GetFileName($oldFile)), ([System.IO.Path]::GetFileName($newFile))) -Color DarkCyan
-                $renamed++
-            }
-        }
-    }
-
-    return $renamed
 }
 
 function Fix-EncodingInSrc {
@@ -1034,111 +860,25 @@ function Export-DataStructure {
         [void]$sb.AppendLine("Generado: $(Get-Date -Format 'yyyy-MM-dd HH:mm')")
         [void]$sb.AppendLine("")
 
-        # ── Paso 1: recopilar metadatos de todas las tablas ──────────────
-        # DAO Attributes: dbAttachedTable = 0x40000000, dbAttachedODBC = 0x20000000
-        $dbAttachedTable = 1073741824
-        $dbAttachedODBC  = 536870912
-
         $tableDefs = $database.TableDefs
-        $tableInfos = @()               # lista de objetos con metadatos
-        $linkedEntries = @()             # solo las vinculadas
-
+        $tables = @()
         for ($i = 0; $i -lt $tableDefs.Count; $i++) {
             $td = $tableDefs[$i]
             try {
-                if ($td.Name -match "^MSys" -or $td.Name -match "^~") { continue }
-
-                $attrs      = 0
-                $tdConnect  = ""
-                $srcTable   = ""
-                try { $attrs     = [long]$td.Attributes }  catch {}
-                try { $tdConnect = [string]$td.Connect }   catch {}
-                try { $srcTable  = [string]$td.SourceTableName } catch {}
-
-                $isLinkedAccess = ($attrs -band $dbAttachedTable) -ne 0
-                $isLinkedODBC   = ($attrs -band $dbAttachedODBC)  -ne 0
-                $isLinked       = $isLinkedAccess -or $isLinkedODBC -or (-not [string]::IsNullOrEmpty($tdConnect))
-
-                # Clasificar tipo de vinculacion
-                $linkType   = ""
-                $linkTarget = ""
-                if ($isLinked -and -not [string]::IsNullOrEmpty($tdConnect)) {
-                    if ($isLinkedODBC -or $tdConnect -match "^ODBC;") {
-                        $linkType = "ODBC"
-                        # Intentar extraer DSN o DRIVER
-                        if ($tdConnect -match "DSN=([^;]+)") {
-                            $linkTarget = "DSN=$($Matches[1])"
-                        } elseif ($tdConnect -match "DRIVER=\{?([^;}]+)") {
-                            $linkTarget = "Driver=$($Matches[1])"
-                        }
-                        # Intentar extraer SERVER/DATABASE para dar mas contexto
-                        $serverPart = ""
-                        $dbPart = ""
-                        if ($tdConnect -match "SERVER=([^;]+)") { $serverPart = $Matches[1] }
-                        if ($tdConnect -match "DATABASE=([^;]+)") { $dbPart = $Matches[1] }
-                        if ($serverPart -and $dbPart) {
-                            $linkTarget += " ($serverPart/$dbPart)"
-                        } elseif ($dbPart) {
-                            $linkTarget += " ($dbPart)"
-                        }
-                    } elseif ($tdConnect -match ";DATABASE=(.+)$") {
-                        $linkType = "Access"
-                        $linkTarget = $Matches[1].Trim()
-                    } elseif ($tdConnect -match "^Excel") {
-                        $linkType = "Excel"
-                        if ($tdConnect -match "DATABASE=(.+)$") { $linkTarget = $Matches[1].Trim() }
-                    } elseif ($tdConnect -match "^SharePoint" -or $tdConnect -match "WSS;") {
-                        $linkType = "SharePoint"
-                        if ($tdConnect -match "DATABASE=(.+)$") { $linkTarget = $Matches[1].Trim() }
-                        elseif ($tdConnect -match "LIST=([^;]+)") { $linkTarget = "Lista: $($Matches[1])" }
-                    } elseif ($tdConnect -match "^Text;") {
-                        $linkType = "Text/CSV"
-                        if ($tdConnect -match "DATABASE=(.+)$") { $linkTarget = $Matches[1].Trim() }
-                    } elseif ($tdConnect -match "^HTML") {
-                        $linkType = "HTML"
-                        if ($tdConnect -match "DATABASE=(.+)$") { $linkTarget = $Matches[1].Trim() }
-                    } else {
-                        $linkType = "Otro"
-                        $linkTarget = $tdConnect
-                    }
-                } elseif ($isLinked) {
-                    $linkType = "Desconocido"
-                    $linkTarget = "(Connect vacio, Attributes=$attrs)"
+                if ($td.Name -notmatch "^MSys" -and $td.Name -notmatch "^~") {
+                    $tables += $td.Name
                 }
-
-                $info = [pscustomobject]@{
-                    Name            = $td.Name
-                    IsLinked        = $isLinked
-                    LinkType        = $linkType
-                    LinkTarget      = $linkTarget
-                    SourceTableName = $srcTable
-                    ConnectString   = $tdConnect
-                }
-                $tableInfos += $info
-                if ($isLinked) { $linkedEntries += $info }
             } catch {}
         }
+        $tables = $tables | Sort-Object
 
-        $tableInfos = $tableInfos | Sort-Object -Property Name
-        $localTables  = @($tableInfos | Where-Object { -not $_.IsLinked })
-        $linkedTables = @($tableInfos | Where-Object { $_.IsLinked })
-
-        [void]$sb.AppendLine("## Tablas ($($tableInfos.Count) total: $($localTables.Count) locales, $($linkedTables.Count) vinculadas)")
+        [void]$sb.AppendLine("## Tablas ($($tables.Count))")
         [void]$sb.AppendLine("")
 
-        # ── Paso 2: detalle de cada tabla ─────────────────────────────────
-        foreach ($tInfo in $tableInfos) {
+        foreach ($tableName in $tables) {
             try {
-                $td = $database.TableDefs[$tInfo.Name]
-                $header = $tInfo.Name
-                if ($tInfo.IsLinked) {
-                    $linkedLabel = $tInfo.LinkType
-                    if ($tInfo.SourceTableName -and $tInfo.SourceTableName -ne $tInfo.Name) {
-                        $linkedLabel += ", origen: ``$($tInfo.SourceTableName)``"
-                    }
-                    $header = "$($tInfo.Name) _(vinculada: $linkedLabel)_"
-                }
-                [void]$sb.AppendLine("### $header")
+                $td = $database.TableDefs[$tableName]
+                [void]$sb.AppendLine("### $tableName")
                 [void]$sb.AppendLine("")
                 [void]$sb.AppendLine("| Campo | Tipo | Tamaño | Requerido | PK |")
                 [void]$sb.AppendLine("|---|---|---|---|---|")
@@ -1168,12 +908,11 @@ function Export-DataStructure {
                 }
                 [void]$sb.AppendLine("")
             } catch {
-                [void]$sb.AppendLine("_Error leyendo tabla: $($tInfo.Name) - $($_.Exception.Message)_")
+                [void]$sb.AppendLine("_Error leyendo tabla: $tableName - $($_.Exception.Message)_")
                 [void]$sb.AppendLine("")
             }
         }
 
-        # ── Paso 3: relaciones ────────────────────────────────────────────
         try {
             $relations = $database.Relations
             if ($relations.Count -gt 0) {
@@ -1199,68 +938,34 @@ function Export-DataStructure {
             }
         } catch {}
 
-        # ── Paso 4: resumen de tablas vinculadas ──────────────────────────
-        if ($linkedEntries.Count -gt 0) {
-            [void]$sb.AppendLine("## Tablas vinculadas")
-            [void]$sb.AppendLine("")
-
-            # Agrupar por tipo de vinculacion
-            $byType = $linkedEntries | Group-Object -Property LinkType | Sort-Object -Property Name
-            foreach ($group in $byType) {
-                [void]$sb.AppendLine("### Vinculadas por $($group.Name)")
-                [void]$sb.AppendLine("")
-                [void]$sb.AppendLine("| Tabla local | Tabla origen | Destino |")
-                [void]$sb.AppendLine("|---|---|---|")
-
-                foreach ($entry in $group.Group | Sort-Object -Property Name) {
-                    $srcName = if ($entry.SourceTableName -and $entry.SourceTableName -ne $entry.Name) { $entry.SourceTableName } else { "—" }
-                    $target  = if ($entry.LinkTarget) { "``$($entry.LinkTarget)``" } else { "—" }
-                    [void]$sb.AppendLine("| $($entry.Name) | $srcName | $target |")
-                }
-                [void]$sb.AppendLine("")
-            }
-
-            # Comprobar alcanzabilidad de origenes basados en fichero
-            $fileBasedTypes = @("Access", "Excel", "Text/CSV", "HTML")
-            $fileTargets = @{}
-            foreach ($entry in $linkedEntries) {
-                if ($entry.LinkType -in $fileBasedTypes -and $entry.LinkTarget) {
-                    if (-not $fileTargets.ContainsKey($entry.LinkTarget)) {
-                        $fileTargets[$entry.LinkTarget] = [System.Collections.Generic.List[string]]::new()
+        # FIX: renombrada $tdConnect para no sobreescribir $connect del scope exterior
+        $linkedSources = @{}
+        for ($i = 0; $i -lt $tableDefs.Count; $i++) {
+            $td = $tableDefs[$i]
+            try {
+                $tdConnect = $td.Connect
+                if (-not [string]::IsNullOrEmpty($tdConnect) -and $tdConnect -match ";DATABASE=(.+)$") {
+                    $linkedDbPath = $Matches[1].Trim()
+                    if (-not $linkedSources.ContainsKey($linkedDbPath)) {
+                        $linkedSources[$linkedDbPath] = [System.Collections.Generic.List[string]]::new()
                     }
-                    $fileTargets[$entry.LinkTarget].Add($entry.Name)
+                    $linkedSources[$linkedDbPath].Add($td.Name)
                 }
-            }
+            } catch {}
+        }
 
-            $unreachable = @($fileTargets.Keys | Where-Object { -not (Test-Path -Path $_) })
-            if ($unreachable.Count -gt 0) {
-                [void]$sb.AppendLine("### Origenes no alcanzados")
-                [void]$sb.AppendLine("")
-                [void]$sb.AppendLine("Los siguientes origenes de datos vinculados no estaban disponibles al generar este ERD.")
-                [void]$sb.AppendLine("Sus tablas aparecen en el listado pero su estructura no pudo verificarse.")
-                [void]$sb.AppendLine("")
-                foreach ($path in $unreachable | Sort-Object) {
-                    $affectedTables = $fileTargets[$path] -join ", "
-                    [void]$sb.AppendLine("- ``$path`` — tablas: $affectedTables")
-                }
-                [void]$sb.AppendLine("")
+        $unreachableBackends = @($linkedSources.Keys | Where-Object { -not (Test-Path -Path $_) })
+        if ($unreachableBackends.Count -gt 0) {
+            [void]$sb.AppendLine("## Backends vinculados no alcanzados")
+            [void]$sb.AppendLine("")
+            [void]$sb.AppendLine("Las siguientes bases de datos vinculadas no estaban disponibles al generar este ERD.")
+            [void]$sb.AppendLine("Sus tablas aparecen en el listado de tablas pero su estructura no pudo verificarse.")
+            [void]$sb.AppendLine("")
+            foreach ($linkedPath in $unreachableBackends) {
+                $linkedTables = $linkedSources[$linkedPath] -join ", "
+                [void]$sb.AppendLine("- ``$linkedPath`` - tablas vinculadas: $linkedTables")
             }
-
-            # Origenes ODBC (no se puede comprobar alcanzabilidad por fichero)
-            $odbcEntries = @($linkedEntries | Where-Object { $_.LinkType -eq "ODBC" })
-            if ($odbcEntries.Count -gt 0) {
-                $odbcTargets = @($odbcEntries | ForEach-Object { $_.LinkTarget } | Sort-Object -Unique)
-                [void]$sb.AppendLine("### Conexiones ODBC")
-                [void]$sb.AppendLine("")
-                [void]$sb.AppendLine("La verificacion de alcanzabilidad de conexiones ODBC no es posible desde DAO.")
-                [void]$sb.AppendLine("Destinos detectados:")
-                [void]$sb.AppendLine("")
-                foreach ($target in $odbcTargets) {
-                    $odbcTablesForTarget = @($odbcEntries | Where-Object { $_.LinkTarget -eq $target } | ForEach-Object { $_.Name }) -join ", "
-                    [void]$sb.AppendLine("- ``$target`` — tablas: $odbcTablesForTarget")
-                }
-                [void]$sb.AppendLine("")
-            }
+            [void]$sb.AppendLine("")
         }
 
         $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
@@ -1320,30 +1025,18 @@ function Fix-EncodingInAccess {
     return $fixed
 }
 
-# ═══════════════════════════════════════════════════════════════════════
-# MAIN
-# ═══════════════════════════════════════════════════════════════════════
-
 $session = $null
 
 try {
     $DestinationRoot = Resolve-DestinationRoot -DestinationRoot $DestinationRoot
 
-    if ($Action -notin @("Generate-ERD", "List")) {
+    if ($Action -ne "Generate-ERD") {
         $AccessPath = Resolve-AccessPath -AccessPath $AccessPath
         $ModulesPath = Resolve-ModulesPath -DestinationRoot $DestinationRoot -AccessPath $AccessPath -Action $Action
 
         Write-Status -Message ("Accion: {0}" -f $Action) -Color Yellow
         Write-Status -Message ("Base de datos: {0}" -f $AccessPath) -Color Yellow
         Write-Status -Message ("Carpeta: {0}" -f $ModulesPath) -Color Yellow
-    } elseif ($Action -eq "List") {
-        $AccessPath = Resolve-AccessPath -AccessPath $AccessPath
-        Write-Status -Message ("Accion: {0}" -f $Action) -Color Yellow
-        Write-Status -Message ("Base de datos: {0}" -f $AccessPath) -Color Yellow
-    } elseif ($Action -eq "Generate-ERD") {
-        # Generate-ERD resuelve sus propias rutas en el bloque de accion
-        # $AccessPath se pasa tal cual (puede estar vacio)
-        Write-Status -Message ("Accion: {0}" -f $Action) -Color Yellow
     } else {
         Write-Status -Message ("Accion: {0}" -f $Action) -Color Yellow
     }
@@ -1414,130 +1107,8 @@ try {
         }
         Write-Status -Message ("OK Import completado ({0})" -f $total) -Color Green
 
-    # ─── NUEVO: Delete ─────────────────────────────────────────────────
-    } elseif ($Action -eq "Delete") {
-        if ($normalizedModules.Count -eq 0) {
-            throw "Se necesita al menos un nombre de modulo para Delete."
-        }
-
-        $session = Open-AccessDatabase -AccessPath $AccessPath -Password $Password
-
-        $total = $normalizedModules.Count
-        $idx = 0
-        foreach ($name in $normalizedModules) {
-            $idx++
-            Write-Status -Message ("[{0}/{1}] Borrando: {2}" -f $idx, $total, $name) -Color Magenta
-            try {
-                Delete-VbaModule -VbProject $session.VbProject -ModuleName $name -AccessApplication $session.AccessApplication
-                Write-Status -Message ("  OK borrado de BD: {0}" -f $name) -Color Green
-
-                if ($DeleteFromSrc) {
-                    $deletedFiles = Delete-SrcFilesForModule -ModulesPath $ModulesPath -ModuleName $name
-                    if ($deletedFiles -eq 0) {
-                        Write-Status -Message ("  No se encontraron archivos en src/ para: {0}" -f $name) -Color DarkYellow
-                    }
-                }
-            } catch {
-                Write-Status -Message ("  ERROR borrando '{0}': {1}" -f $name, $_.Exception.Message) -Color Red
-            }
-        }
-        Write-Status -Message ("OK Delete completado ({0})" -f $total) -Color Green
-
-    # ─── NUEVO: Rename ─────────────────────────────────────────────────
-    } elseif ($Action -eq "Rename") {
-        if ($normalizedModules.Count -ne 1) {
-            throw "Rename requiere exactamente un modulo en -ModuleName (el nombre actual)."
-        }
-        if ([string]::IsNullOrWhiteSpace($NewModuleName)) {
-            throw "Rename requiere -NewModuleName con el nuevo nombre."
-        }
-
-        $oldName = $normalizedModules[0]
-        $session = Open-AccessDatabase -AccessPath $AccessPath -Password $Password
-
-        Write-Status -Message ("Renombrando: {0} -> {1}" -f $oldName, $NewModuleName) -Color Cyan
-        Rename-VbaModule -VbProject $session.VbProject -OldName $oldName -NewName $NewModuleName -AccessApplication $session.AccessApplication
-        Write-Status -Message ("  OK renombrado en BD") -Color Green
-
-        # Renombrar archivos en src/
-        $renamedFiles = Rename-SrcFilesForModule -ModulesPath $ModulesPath -OldName $oldName -NewName $NewModuleName
-        if ($renamedFiles -eq 0) {
-            Write-Status -Message ("  No se encontraron archivos en src/ para renombrar.") -Color DarkYellow
-            Write-Status -Message ("  Ejecuta 'export {0}' para generar los archivos con el nuevo nombre." -f $NewModuleName) -Color Yellow
-        }
-
-        Write-Status -Message ("OK Rename completado") -Color Green
-
-    # ─── NUEVO: List ───────────────────────────────────────────────────
-    } elseif ($Action -eq "List") {
-        $session = Open-AccessDatabase -AccessPath $AccessPath -Password $Password
-        $vbProject = $session.VbProject
-        $components = $vbProject.VBComponents
-
-        $modules = @()
-        for ($i = 1; $i -le $components.Count; $i++) {
-            $c = $components.Item($i)
-            try {
-                $type = [int]$c.Type
-                $typeName = Get-ComponentTypeName -Type $type
-                $lineCount = 0
-                try {
-                    if ($c.CodeModule) { $lineCount = $c.CodeModule.CountOfLines }
-                } catch {}
-                $modules += [pscustomobject]@{
-                    Name  = $c.Name
-                    Type  = $typeName
-                    Lines = $lineCount
-                }
-            } finally {
-                try { [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($c) | Out-Null } catch {}
-            }
-        }
-
-        $modules = $modules | Sort-Object -Property Type, Name
-
-        Write-Host ""
-        Write-Host ("  {0,-40} {1,-10} {2,6}" -f "Nombre", "Tipo", "Lineas")
-        Write-Host ("  {0,-40} {1,-10} {2,6}" -f ("─" * 40), ("─" * 10), ("─" * 6))
-        foreach ($m in $modules) {
-            $color = switch ($m.Type) {
-                "Form"   { [ConsoleColor]::Cyan }
-                "Class"  { [ConsoleColor]::Yellow }
-                "Module" { [ConsoleColor]::Green }
-                default  { [ConsoleColor]::Gray }
-            }
-            $old = $Host.UI.RawUI.ForegroundColor
-            $Host.UI.RawUI.ForegroundColor = $color
-            Write-Host ("  {0,-40} {1,-10} {2,6}" -f $m.Name, $m.Type, $m.Lines)
-            $Host.UI.RawUI.ForegroundColor = $old
-        }
-        Write-Host ""
-        Write-Status -Message ("Total: {0} modulo(s)" -f $modules.Count) -Color Green
-
     } elseif ($Action -eq "Generate-ERD") {
-        # ── Resolver qué BDs escanear ─────────────────────────────────────
-        # --backend: genera ERD del backend (comportamiento clasico)
-        # --access:  genera ERD del frontend (util para ver tablas vinculadas)
-        # ambos:     genera ERD de los dos
-        # ninguno:   auto-detecta backend *_Datos.accdb; si no hay, intenta frontend
-
-        $dbsToScan = @()   # lista de [pscustomobject]@{ Path; Label }
-
-        $hasExplicitBackend = -not [string]::IsNullOrWhiteSpace($BackendPath)
-        $hasExplicitAccess  = -not [string]::IsNullOrWhiteSpace($AccessPath)
-
-        if ($hasExplicitBackend) {
-            $BackendPath = (Resolve-Path -Path $BackendPath).Path
-            $dbsToScan += [pscustomobject]@{ Path = $BackendPath; Label = "Backend" }
-        }
-
-        if ($hasExplicitAccess) {
-            $AccessPath = (Resolve-Path -Path $AccessPath).Path
-            $dbsToScan += [pscustomobject]@{ Path = $AccessPath; Label = "Frontend" }
-        }
-
-        # Si no se paso ninguno, auto-detectar
-        if ($dbsToScan.Count -eq 0) {
+        if ([string]::IsNullOrWhiteSpace($BackendPath)) {
             $candidates = Get-ChildItem -Path (Get-Location) -File -Filter "*_Datos.accdb" -ErrorAction SilentlyContinue
             if (-not $candidates) {
                 $candidates = Get-ChildItem -Path (Get-Location) -File -Filter "*_Datos.mdb" -ErrorAction SilentlyContinue
@@ -1547,23 +1118,15 @@ try {
                 if ($candidates.Count -gt 1) {
                     Write-Status -Message "ADVERTENCIA: Multiples backends encontrados, usando el primero: $($candidates[0].Name)" -Color Yellow
                 }
-                $dbsToScan += [pscustomobject]@{ Path = $candidates[0].FullName; Label = "Backend" }
+                $BackendPath = $candidates[0].FullName
             } else {
-                # Sin backend: intentar el frontend (la BD principal)
-                try {
-                    $frontendPath = (Resolve-AccessPath -AccessPath "").Trim()
-                    if ($frontendPath) {
-                        $dbsToScan += [pscustomobject]@{ Path = $frontendPath; Label = "Frontend" }
-                    }
-                } catch {}
-            }
-
-            if ($dbsToScan.Count -eq 0) {
-                throw "No se especifico -BackendPath ni -AccessPath y no se encontro ningun archivo .accdb/.mdb en el directorio actual."
+                throw "No se especifico -BackendPath y no se encontro ningun archivo *_Datos.accdb/.mdb en el directorio actual."
             }
         }
 
-        # ── Resolver carpeta de salida ────────────────────────────────────
+        $BackendPath = (Resolve-Path -Path $BackendPath).Path
+        Write-Status -Message ("Backend: {0}" -f $BackendPath) -Color Yellow
+
         if ([string]::IsNullOrWhiteSpace($ErdPath)) {
             $parent = Split-Path -Parent $DestinationRoot
             $ErdPath = Join-Path -Path $parent -ChildPath "ERD"
@@ -1575,22 +1138,14 @@ try {
         $ErdPath = (Resolve-Path -Path $ErdPath).Path
         Write-Status -Message ("ERD Folder: {0}" -f $ErdPath) -Color Yellow
 
-        # ── Generar ERD para cada BD ──────────────────────────────────────
-        foreach ($dbInfo in $dbsToScan) {
-            $dbPath = $dbInfo.Path
-            $dbLabel = $dbInfo.Label
-            $dbBaseName = [System.IO.Path]::GetFileNameWithoutExtension($dbPath)
-            $mdFile = Join-Path -Path $ErdPath -ChildPath ($dbBaseName + ".md")
+        $backendName = [System.IO.Path]::GetFileNameWithoutExtension($BackendPath)
+        $mdFile = Join-Path -Path $ErdPath -ChildPath ($backendName + ".md")
 
-            Write-Status -Message ("{0}: {1}" -f $dbLabel, $dbPath) -Color Yellow
-            Export-DataStructure -DatabasePath $dbPath -OutputPath $mdFile -Password $Password
-            Write-Status -Message ("  -> {0}" -f $mdFile) -Color Green
-        }
+        Export-DataStructure -DatabasePath $BackendPath -OutputPath $mdFile -Password $Password
 
-        Write-Status -Message ("OK ERD generado ({0} fichero(s))" -f $dbsToScan.Count) -Color Green
+        Write-Status -Message ("OK ERD generado en: {0}" -f $mdFile) -Color Green
 
     } else {
-        # Fix-Encoding
         $fixedSrc = 0
         $fixedAccess = 0
 

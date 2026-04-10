@@ -61,11 +61,8 @@ function printHelp() {
       "  node cli.js import-code <Mod..>[--access <ruta>] [--destination_root <dir>] [--password <pwd>]",
       "  node cli.js import-all     [--access <ruta>] [--destination_root <dir>] [--password <pwd>]",
       "  node cli.js sync    <Mod..>[--access <ruta>] [--destination_root <dir>] [--password <pwd>]",
-      "  node cli.js delete  <Mod..>[--access <ruta>] [--destination_root <dir>] [--password <pwd>] [--delete-src]",
-      "  node cli.js rename  <Old> <New> [--access <ruta>] [--destination_root <dir>] [--password <pwd>]",
-      "  node cli.js list           [--access <ruta>] [--password <pwd>]",
       "  node cli.js fix-encoding   [--access <ruta>] [--destination_root <dir>] [--password <pwd>] [--location Both|Src|Access] [<Mod...>]",
-      "  node cli.js generate-erd   [--access <ruta>] [--backend <ruta>] [--erd_path <dir>] [--password <pwd>]",
+      "  node cli.js generate-erd   [--backend <ruta>] [--erd_path <dir>] [--password <pwd>]",
       "  node cli.js status",
       "  node cli.js end            [--auto_export_on_end false]",
       "",
@@ -79,14 +76,9 @@ function printHelp() {
       "  import-code <Mod..> Importa code-behind desde *.cls/*.bas (sin layout)",
       "  import-all       Importa todos los módulos de src/ hacia la BD",
       "  sync    <Mod..>  Alias de import",
-      "  delete  <Mod..>  Borra módulos de la BD (y opcionalmente de src/ con --delete-src)",
-      "  rename  <Old> <New>  Renombra un módulo en la BD y en src/",
-      "  list             Lista todos los módulos VBA de la BD con su tipo",
       "  fix-encoding     Corrige encoding (ANSI→UTF-8 sin BOM) en src/, en la BD, o en ambos",
       "                   Sin módulos: procesa todos. Con módulos: solo los indicados.",
       "  generate-erd     Genera documentación de estructura de tablas en Markdown",
-      "                   --backend: ERD del backend. --access: ERD del frontend (tablas vinculadas).",
-      "                   Ambos: genera los dos. Ninguno: auto-detecta.",
       "  status           Muestra el estado de la sesión activa",
       "  end              Cierra la sesión y restaura la configuración de Access",
       "",
@@ -100,8 +92,7 @@ function printHelp() {
       "  --auto_export_on_end false   Desactiva export final al cerrar sesión",
       "  --location Both|Src|Access   Para fix-encoding: dónde aplicar (default: Both)",
       "  --backend <ruta>             Para generate-erd: ruta al backend _Datos.accdb",
-      "  --erd_path <dir>             Para generate-erd: carpeta de salida (default: docs/ERD)",
-      "  --delete-src                 Para delete: borrar también los archivos de src/"
+      "  --erd_path <dir>             Para generate-erd: carpeta de salida (default: docs/ERD)"
     ].join("\n")
   );
 }
@@ -185,38 +176,6 @@ async function main() {
     return;
   }
 
-  if (command === "delete") {
-    if (mods.length === 0) {
-      console.error("Faltan módulos. Ejemplo: node cli.js delete Utilidades Form_FormViejo");
-      process.exitCode = 1;
-      return;
-    }
-    const deleteFromSrc = toBoolFlag(flags["delete-src"], false);
-    await skill.deleteModules({ moduleNames: mods, accessPath, deleteFromSrc });
-    return;
-  }
-
-  if (command === "rename") {
-    if (mods.length < 2) {
-      console.error("Se necesitan dos argumentos: <NombreAntiguo> <NombreNuevo>");
-      console.error("Ejemplo: node cli.js rename modViejo modNuevo");
-      process.exitCode = 1;
-      return;
-    }
-    if (mods.length > 2) {
-      console.error("Solo se puede renombrar un módulo a la vez.");
-      process.exitCode = 1;
-      return;
-    }
-    await skill.renameModule({ oldName: mods[0], newName: mods[1], accessPath });
-    return;
-  }
-
-  if (command === "list") {
-    await skill.listModules({ accessPath });
-    return;
-  }
-
   if (command === "fix-encoding") {
     const location = flags.location || "Both";
     const validLocations = ["Both", "Src", "Access"];
@@ -232,7 +191,7 @@ async function main() {
   if (command === "generate-erd") {
     const backendPath = normalizePathFlag(flags.backend);
     const erdPath = normalizePathFlag(flags.erd_path || "docs/ERD");
-    await skill.generateErd({ backendPath, erdPath, accessPath });
+    await skill.generateErd({ backendPath, erdPath });
     return;
   }
 
