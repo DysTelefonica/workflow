@@ -2,7 +2,7 @@
 [CmdletBinding()]
 Param(
     [Parameter(Mandatory = $true, Position = 0)]
-    [ValidateSet("Export", "Import", "Fix-Encoding", "Generate-ERD")]
+    [ValidateSet("Export", "Import", "Fix-Encoding", "Generate-ERD", "Sandbox")]
     [string]$Action,
 
     [Parameter()]
@@ -33,6 +33,15 @@ Param(
 
     [Parameter()]
     [string]$ErdPath,
+
+    # Sandbox: contraseña para abrir los backends vinculados (default: misma que -Password)
+    [Parameter()]
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSAvoidUsingPlainTextForPassword", "BackendPassword", Justification = "Requerido por especificacion del proyecto.")]
+    [string]$BackendPassword,
+
+    # Sandbox: no borrar los backends copiados al terminar (quedan como sidecars)
+    [Parameter()]
+    [switch]$KeepSidecars,
 
     [Parameter()]
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSAvoidUsingPlainTextForPassword", "Password", Justification = "Requerido por especificacion del proyecto.")]
@@ -1144,6 +1153,143 @@ try {
         Export-DataStructure -DatabasePath $BackendPath -OutputPath $mdFile -Password $Password
 
         Write-Status -Message ("OK ERD generado en: {0}" -f $mdFile) -Color Green
+
+    } elseif ($Action -eq "Sandbox") {
+        # =================================================================
+        # SANDBOX: Copiar backends vinculados al lado del frontend y
+        #          revincular las tablas para que apunten a las copias locales.
+        #          Resultado: un sandbox aislado de produccion.
+        # =================================================================
+        $frontDir = Split-Path $AccessPath -Parent
+        $bkpPassword = if ($BackendPassword) { $BackendPassword } else { $Password }
+
+        # --- Fase 1: Descubrir backends vinculados via DAO ---
+        Write-Status -Message "Descubriendo tablas vinculadas..." -Color Cyan
+        $daoEngine = $null; $daoDb = $null
+        $backendMap = @{}  # ruta_backend_original -> @(tabla1, tabla2, ...)
+        try {
+            $daoEngine = New-DaoDbEngine
+            if (-not $daoEngine) { throw "No se pudo crear DAO.DBEngine" }
+            $frontConn = if ($Password) { ";PWD=$Password" } else { "" }
+            $daoDb = $daoEngine.OpenDatabase($AccessPath, $false, $false, $frontConn)
+            $tdefs = $daoDb.TableDefs
+            for ($i = 0; $i -lt $tdefs.Count; $i++) {
+                $td = $tdefs[$i]
+                $tName = $td.Name
+                if ($tName -match "^~" -or $tName -match "^MSys") { continue }
+                $srcTable = $td.SourceTableName
+                $connect  = $td.Connect
+                if ([string]::IsNullOrEmpty($srcTable)) { continue }
+                # Extraer ruta del backend de la connect string: ";DATABASE=C:\...\file.accdb;..."
+                if ($connect -match "DATABASE=([^;]+)") {
+                    $backendPath = $Matches[1].Trim()
+                    if (-not $backendMap.ContainsKey($backendPath)) {
+                        $backendMap[$backendPath] = @()
+                    }
+                    $backendMap[$backendPath] += $tName
+                }
+            }
+        } finally {
+            if ($daoDb) { try { $daoDb.Close() } catch {} }
+            foreach ($o in @($daoDb, $daoEngine)) {
+                if ($o) { try { [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($o) | Out-Null } catch {} }
+            }
+            [System.GC]::Collect(); [System.GC]::WaitForPendingFinalizers()
+        }
+
+        if ($backendMap.Count -eq 0) {
+            Write-Status -Message "El frontend no tiene tablas vinculadas. Nada que hacer." -Color Green
+            return
+        }
+
+        $totalTables = ($backendMap.Values | ForEach-Object { $_.Count } | Measure-Object -Sum).Sum
+        Write-Status -Message ("Encontrados {0} backend(s) con {1} tabla(s) vinculada(s):" -f $backendMap.Count, $totalTables) -Color Yellow
+        foreach ($bk in $backendMap.Keys) {
+            Write-Status -Message ("  {0} ({1} tablas)" -f $bk, $backendMap[$bk].Count) -Color Gray
+        }
+
+        # --- Fase 2: Copiar cada backend al lado del frontend ---
+        Write-Status -Message "Copiando backends al directorio del frontend..." -Color Cyan
+        $sidecarMap = @{}  # ruta_original -> ruta_sidecar
+        foreach ($originalPath in $backendMap.Keys) {
+            $backendFileName = Split-Path $originalPath -Leaf
+            $sidecarPath = Join-Path $frontDir $backendFileName
+
+            if ($sidecarPath -eq $originalPath) {
+                Write-Status -Message ("  SKIP: {0} ya esta en el directorio del frontend" -f $backendFileName) -Color Yellow
+                $sidecarMap[$originalPath] = $originalPath
+                continue
+            }
+
+            if (Test-Path $sidecarPath) {
+                Write-Status -Message ("  Reemplazando sidecar existente: {0}" -f $backendFileName) -Color Yellow
+                Remove-Item $sidecarPath -Force
+            }
+
+            if (-not (Test-Path $originalPath)) {
+                throw ("Backend no accesible: {0}" -f $originalPath)
+            }
+
+            Copy-Item -LiteralPath $originalPath -Destination $sidecarPath -Force
+            Write-Status -Message ("  Copiado: {0}" -f $backendFileName) -Color Green
+            $sidecarMap[$originalPath] = $sidecarPath
+
+            # Copiar .laccdb si existe (evitar locks huerfanos)
+            $laccdbOrig = [System.IO.Path]::ChangeExtension($originalPath, ".laccdb")
+            # No copiar el lock — queremos acceso limpio
+        }
+
+        # --- Fase 3: Abrir frontend via COM y revincular ---
+        Write-Status -Message "Abriendo frontend via COM para revincular tablas..." -Color Cyan
+        $session = Open-AccessDatabase -AccessPath $AccessPath -Password $Password
+        $comDb = $session.AccessApplication.CurrentDb()
+
+        try {
+            # Primero: eliminar todas las tablas vinculadas que vamos a reapuntar
+            $toDelete = @()
+            for ($i = 0; $i -lt $comDb.TableDefs.Count; $i++) {
+                $td = $comDb.TableDefs[$i]
+                if (-not [string]::IsNullOrEmpty($td.SourceTableName)) {
+                    $toDelete += $td.Name
+                }
+            }
+            foreach ($tname in $toDelete) {
+                try {
+                    $comDb.TableDefs.Delete($tname)
+                    Write-Status -Message ("  Desvinculada: {0}" -f $tname) -Color Gray
+                } catch {
+                    Write-Status -Message ("  WARN desvinculando {0}: {1}" -f $tname, $_.Exception.Message) -Color Yellow
+                }
+            }
+
+            # Segundo: crear nuevos vinculos apuntando a los sidecars
+            $okCount = 0; $errorCount = 0
+            foreach ($originalPath in $backendMap.Keys) {
+                $sidecarPath = $sidecarMap[$originalPath]
+                $tables = $backendMap[$originalPath]
+                $newConnect = ";DATABASE=$sidecarPath;PWD=$bkpPassword;"
+
+                foreach ($tableName in $tables) {
+                    try {
+                        $newTd = $comDb.CreateTableDef($tableName, 0, $tableName, $newConnect)
+                        $comDb.TableDefs.Append($newTd)
+                        Write-Status -Message ("  OK: {0} -> {1}" -f $tableName, (Split-Path $sidecarPath -Leaf)) -Color Green
+                        $okCount++
+                    } catch {
+                        Write-Status -Message ("  ERROR: {0} - {1}" -f $tableName, $_.Exception.Message) -Color Red
+                        $errorCount++
+                    }
+                }
+            }
+
+            Write-Status -Message ("Sandbox completado: {0} OK, {1} errores" -f $okCount, $errorCount) -Color $(if ($errorCount -eq 0) { "Green" } else { "Yellow" })
+        } finally {
+            if ($comDb) {
+                try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($comDb) | Out-Null } catch {}
+            }
+        }
+
+        # La sesion COM se cierra en el finally general del script
 
     } else {
         $fixedSrc = 0

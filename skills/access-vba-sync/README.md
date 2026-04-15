@@ -145,6 +145,32 @@ El archivo generado se nombra igual que el backend: `NombreBackend.md` dentro de
 
 ---
 
+### `sandbox` — Crear sandbox aislado de producción
+
+```powershell
+node cli.js sandbox [--access <ruta>] [--password <pwd>] [--backend_password <pwd>] [--keep_sidecars]
+```
+
+Descubre todos los backends vinculados en el frontend, copia cada uno al directorio del frontend como sidecar, elimina los vínculos originales (producción) y crea vínculos nuevos apuntando a las copias locales. El resultado es un frontend que trabaja sobre copias locales sin tocar los datos reales.
+
+**Flujo típico:**
+
+```powershell
+# 1. Crear el sandbox (revincular a backends locales)
+node cli.js sandbox --access MiApp_Gestion.accdb
+
+# 2. Trabajar normalmente sobre el sandbox
+node cli.js start --access MiApp_Gestion.accdb
+# ... editar, importar, compilar ...
+node cli.js end
+```
+
+**`--backend_password`**: contraseña de los backends vinculados si difiere de `--password`. Si no se pasa, usa la misma contraseña del frontend.
+
+**`--keep_sidecars`**: los backends copiados siempre se mantienen (son el sandbox). Este flag existe por compatibilidad futura.
+
+---
+
 ### `status` — Estado de la sesión
 
 ```powershell
@@ -177,6 +203,8 @@ Para el watcher si está activo, importa pendientes, realiza el export final (co
 | `--backend <ruta>` | Backend para generate-erd | Autodetecta `*_Datos.accdb` |
 | `--erd_path <dir>` | Carpeta de salida para el ERD | `docs/ERD` |
 | `--auto_export_on_end false` | Desactiva export final al cerrar | `true` |
+| `--backend_password <pwd>` | Contraseña de los backends (sandbox) | Misma que `--password` |
+| `--keep_sidecars` | Mantener backends copiados (sandbox) | `false` |
 
 ---
 

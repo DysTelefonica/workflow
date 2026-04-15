@@ -141,7 +141,7 @@ class AccessVbaSyncSkill {
     return destinationRootAbs;
   }
 
-  runVbaManager({ action, accessPath, destinationRootAbs, moduleNames = [], backendPath, erdPath, location, importMode }) {
+  runVbaManager({ action, accessPath, destinationRootAbs, moduleNames = [], backendPath, erdPath, location, importMode, backendPassword, keepSidecars }) {
     return new Promise((resolve, reject) => {
       const exe = powershellExe();
       const args = [
@@ -178,6 +178,13 @@ class AccessVbaSyncSkill {
       // Esto evita toda ambiguedad posicional con otros parametros como -Location.
       if (Array.isArray(moduleNames) && moduleNames.length > 0) {
         args.push("-ModuleName", moduleNames.join(","));
+      }
+
+      if (backendPassword) {
+        args.push("-BackendPassword", backendPassword);
+      }
+      if (keepSidecars) {
+        args.push("-KeepSidecars");
       }
 
       if (this.password) {
@@ -674,6 +681,26 @@ class AccessVbaSyncSkill {
       erdPath
     });
     console.log("✅ ERD Generado.");
+  }
+
+  async sandbox({ accessPath, backendPassword, keepSidecars } = {}) {
+    await this.ensureReady();
+    await this.loadSessionFromDisk();
+
+    const detectedAccess = await this.detectAccessPath({ accessPath });
+    if (!detectedAccess) throw new Error("No hay BD detectada para sandbox.");
+
+    const destinationRootAbs = this.session.destinationRoot || this.resolveDestinationRoot();
+
+    console.log("🔒 Creando sandbox (revinculando a backends locales)...");
+    await this.runVbaManager({
+      action: "Sandbox",
+      accessPath: detectedAccess,
+      destinationRootAbs,
+      backendPassword: backendPassword || null,
+      keepSidecars: !!keepSidecars
+    });
+    console.log("✅ Sandbox listo.");
   }
 
   async status() {

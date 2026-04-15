@@ -38,6 +38,8 @@ El PS1 es el motor que ejecuta todas las operaciones sobre Access. Acepta los si
 | `-BackendPath` | string | Ruta al backend `*_Datos.accdb` para Generate-ERD |
 | `-ErdPath` | string | Carpeta de salida del ERD |
 | `-Location` | `Both\|Src\|Access` | Ámbito de Fix-Encoding (default: `Both`) |
+| `-BackendPassword` | string | Solo para `Sandbox`: contraseña de los backends vinculados (default: misma que `-Password`) |
+| `-KeepSidecars` | switch | Solo para `Sandbox`: mantener los backends copiados tras revincular |
 
 ### Acciones
 
@@ -67,6 +69,15 @@ El PS1 es el motor que ejecuta todas las operaciones sobre Access. Acepta los si
 - Detecta backends vinculados no alcanzables y los documenta
 - Autodetecta `*_Datos.accdb` si no se pasa `-BackendPath`
 
+**`Sandbox`** — Crea un sandbox aislado de producción:
+- Descubre todos los backends vinculados en el frontend via DAO (parsea connect strings)
+- Copia cada backend al directorio del frontend (sidecars)
+- Elimina los vínculos actuales (producción)
+- Crea nuevos vínculos apuntando a los sidecars locales
+- Usa `Open-AccessDatabase` canónico (COM con `CreateTableDef` para vínculos)
+- `-BackendPassword`: contraseña de los backends si difiere de `-Password`
+- `-KeepSidecars`: switch para mantener los backends copiados (default: se mantienen siempre, son el sandbox)
+
 ---
 
 ## Comandos del CLI (cli.js)
@@ -88,6 +99,7 @@ El CLI es la interfaz de usuario sobre el PS1. Todos los comandos que expone map
 | `sync <Mod...>` | `Import` | selectivo | Alias de import |
 | `fix-encoding [Mod...]` | `Fix-Encoding` | selectivo/todos | Corrige encoding |
 | `generate-erd` | `Generate-ERD` | — | Genera ERD Markdown |
+| `sandbox` | `Sandbox` | — | Copia backends vinculados al lado del frontend y revincula |
 | `status` | — | — | Muestra estado de sesión |
 | `end` | `Export` (opcional) | todos | Cierra sesión + export final |
 
@@ -101,6 +113,8 @@ El CLI es la interfaz de usuario sobre el PS1. Todos los comandos que expone map
 | `--location Both\|Src\|Access` | `-Location` | `Both` |
 | `--backend <ruta>` | `-BackendPath` | Autodetecta `*_Datos.accdb` |
 | `--erd_path <dir>` | `-ErdPath` | `docs/ERD` |
+| `--backend_password <pwd>` | `-BackendPassword` | Misma que `--password` |
+| `--keep_sidecars` | `-KeepSidecars` | `false` |
 | `--debounce_ms <n>` | — (Node.js) | `600` |
 | `--auto_export_on_end false` | — (Node.js) | `true` |
 
@@ -325,6 +339,24 @@ start → (generate-erd) → IA edita src/ → watch|import → compilar VBE →
 5. Compilar: **Abre Access → VBE → Debug → Compile**
 6. `end` — Sync final + export final opcional + resumen
 
+### Sandbox (desarrollo aislado de producción)
+```
+sandbox → start → IA edita src/ → watch|import → compilar VBE → end
+```
+
+1. `sandbox` — Copia backends de producción al directorio del frontend y revincula tablas
+2. A partir de aquí el frontend trabaja sobre copias locales, sin tocar producción
+3. Flujo normal: `start` → edición → `import` → compilar → `end`
+
+**Ejemplo:**
+```powershell
+# Frontend con tablas vinculadas a backends en red
+node cli.js sandbox --access MiApp_Gestion.accdb --password dpddpd
+
+# Ahora las tablas apuntan a copias locales — sandbox listo
+node cli.js start --access MiApp_Gestion.accdb
+```
+
 ---
 
 ## Casos límite cubiertos
@@ -336,6 +368,9 @@ start → (generate-erd) → IA edita src/ → watch|import → compilar VBE →
 - Guardados masivos simultáneos → batching con debounce configurable
 - Access abierto/bloqueado → error claro, no loops infinitos
 - BD con contraseña → `--password` propagado a todas las operaciones DAO y COM
+- Sandbox: backend ya está en el directorio del frontend → se usa directamente (no se copia sobre sí mismo)
+- Sandbox: frontend sin tablas vinculadas → termina con "Nada que hacer"
+- Sandbox: múltiples backends → cada uno se copia y se revinculan sus tablas independientemente
 
 ---
 
@@ -349,5 +384,6 @@ start → (generate-erd) → IA edita src/ → watch|import → compilar VBE →
 - `watch`: editar un `.form.txt` → se importa automáticamente
 - `fix-encoding --location Src` → solo toca archivos en `src/`
 - `import-all` → importa todos los archivos de `src/` sin intervención
+- `sandbox` → backends copiados al lado del frontend, tablas revinculadas a sidecars
 - `generate-erd` → genera `docs/ERD/NombreBackend.md`
 - `end` → export final + resumen con módulos tocados

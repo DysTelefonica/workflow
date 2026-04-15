@@ -63,6 +63,7 @@ function printHelp() {
       "  node cli.js sync    <Mod..>[--access <ruta>] [--destination_root <dir>] [--password <pwd>]",
       "  node cli.js fix-encoding   [--access <ruta>] [--destination_root <dir>] [--password <pwd>] [--location Both|Src|Access] [<Mod...>]",
       "  node cli.js generate-erd   [--backend <ruta>] [--erd_path <dir>] [--password <pwd>]",
+      "  node cli.js sandbox        [--access <ruta>] [--password <pwd>] [--backend_password <pwd>] [--keep_sidecars]",
       "  node cli.js status",
       "  node cli.js end            [--auto_export_on_end false]",
       "",
@@ -79,6 +80,8 @@ function printHelp() {
       "  fix-encoding     Corrige encoding (ANSI→UTF-8 sin BOM) en src/, en la BD, o en ambos",
       "                   Sin módulos: procesa todos. Con módulos: solo los indicados.",
       "  generate-erd     Genera documentación de estructura de tablas en Markdown",
+      "  sandbox          Copia backends vinculados al lado del frontend y revincula las tablas",
+      "                   creando un sandbox aislado de producción",
       "  status           Muestra el estado de la sesión activa",
       "  end              Cierra la sesión y restaura la configuración de Access",
       "",
@@ -92,7 +95,9 @@ function printHelp() {
       "  --auto_export_on_end false   Desactiva export final al cerrar sesión",
       "  --location Both|Src|Access   Para fix-encoding: dónde aplicar (default: Both)",
       "  --backend <ruta>             Para generate-erd: ruta al backend _Datos.accdb",
-      "  --erd_path <dir>             Para generate-erd: carpeta de salida (default: docs/ERD)"
+      "  --erd_path <dir>             Para generate-erd: carpeta de salida (default: docs/ERD)",
+      "  --backend_password <pwd>     Para sandbox: contraseña de los backends (default: misma que --password)",
+      "  --keep_sidecars              Para sandbox: no borrar los backends copiados al terminar"
     ].join("\n")
   );
 }
@@ -192,6 +197,14 @@ async function main() {
     const backendPath = normalizePathFlag(flags.backend);
     const erdPath = normalizePathFlag(flags.erd_path || "docs/ERD");
     await skill.generateErd({ backendPath, erdPath });
+    return;
+  }
+
+  if (command === "sandbox") {
+    const accessPath = normalizePathFlag(flags.access);
+    const backendPassword = flags.backend_password || null;
+    const keepSidecars = toBoolFlag(flags.keep_sidecars, false);
+    await skill.sandbox({ accessPath, backendPassword, keepSidecars });
     return;
   }
 
