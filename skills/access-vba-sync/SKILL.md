@@ -217,7 +217,7 @@ Usalo cuando querés trabajar aislado de producción o de una red compartida.
 | `export-all` | export total | **ALTO** si hay cambios locales no importados |
 | `import <Mod...>` | importar módulos selectivos | bajo |
 | `import-form <Mod...>` | importar UI de documentos Access (`.form.txt` / `.report.txt`) | bajo |
-| `import-code <Mod...>` | importar solo código | bajo |
+| `import-code <Mod...>` | importar solo code-behind de `Form_` / `Report_` | bajo |
 | `import-all` | importar todo `src/` | medio |
 | `fix-encoding [Mod...]` | corregir encoding | medio |
 | `generate-erd` | documentación técnica | bajo |
@@ -234,7 +234,7 @@ Usalo cuando querés trabajar aislado de producción o de una red compartida.
 ## Caso A — La IA ya cambió archivos en `src/`
 ### Usar:
 - `import <módulos>`
-- `import-code <módulos>`
+- `import-code <módulos>` **solo** para document modules (`Form_...` / `Report_...`)
 - `import-form <módulos>`
 - `import-all` si está controlado
 
@@ -471,10 +471,13 @@ node cli.js start --access <BD>
 
 ## Flujo con formularios
 
-### Cambio de código
+### Cambio de código de formulario/reporte
 ```bash
 node cli.js import-code Form_MiFormulario
 ```
+
+> `import-code` no es para clases normales ni módulos `.bas`.
+> Si el archivo vive en `classes/` o `modules/`, usar `import`.
 
 ### Cambio de UI/layout
 ```bash

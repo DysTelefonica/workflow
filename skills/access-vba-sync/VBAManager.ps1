@@ -1287,9 +1287,13 @@ function Import-VbaModule {
             $docInfo = Resolve-AccessDocumentInfo -ModuleName $ModuleName -AccessApplication $AccessApplication
         }
 
-        if ((-not $docInfo) -and ($ModuleName -match '^Report_' -or $src -match '\.report\.txt$')) {
+        $srcLower = $src.ToLowerInvariant()
+        $isReportDocumentSource = ($ModuleName -match '^Report_') -or ($srcLower -match '[\\/]reports[\\/].+\.cls$') -or ($srcLower -match '\.report\.txt$')
+        $isFormDocumentSource = ($ModuleName -match '^Form_') -or ($srcLower -match '[\\/]forms[\\/].+\.cls$') -or ($srcLower -match '\.form\.txt$')
+
+        if ((-not $docInfo) -and $isReportDocumentSource) {
             $docInfo = [pscustomobject]@{ AccessObjectName = ($ModuleName -replace '^Report_', ''); AcObjectType = $script:AC_REPORT }
-        } elseif (-not $docInfo -and ($ModuleName -match '^Form_' -or $src -match '\.form\.txt$' -or $ImportMode -eq 'Code')) {
+        } elseif (-not $docInfo -and $isFormDocumentSource) {
             $docInfo = [pscustomobject]@{ AccessObjectName = ($ModuleName -replace '^Form_', ''); AcObjectType = $script:AC_FORM }
         }
 

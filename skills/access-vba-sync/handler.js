@@ -70,6 +70,23 @@ function accessDocumentNameCandidates(moduleName, kind) {
   return out;
 }
 
+function moduleNameVariants(moduleName) {
+  const out = [];
+  const push = (v) => {
+    const s = String(v || "").trim();
+    if (!s || out.includes(s)) return;
+    out.push(s);
+  };
+
+  push(moduleName);
+  push(String(moduleName || "").replace(/^(Form|Report)_/, ""));
+  if (!/^(Form|Report)_/.test(String(moduleName || ""))) {
+    push(`Form_${moduleName}`);
+    push(`Report_${moduleName}`);
+  }
+  return out;
+}
+
 function buildExistsDescriptor(catalog, moduleName) {
   const components = Array.isArray(catalog.components) ? catalog.components : [];
   const forms = new Set(Array.isArray(catalog.forms) ? catalog.forms : []);
@@ -214,6 +231,78 @@ class AccessVbaSyncSkill {
 
   modulesPathFor(accessPath, destinationRootAbs) {
     return destinationRootAbs;
+  }
+
+  async pathExists(filePath) {
+    try {
+      await fsp.access(filePath, fs.constants.F_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async getImportCodeHints(moduleName, destinationRootAbs) {
+    const variants = moduleNameVariants(moduleName);
+    const hints = {
+      formCls: false,
+      reportCls: false,
+      formText: false,
+      reportText: false,
+      classCls: false,
+      moduleBas: false
+    };
+
+    for (const variant of variants) {
+      if (!hints.formCls && await this.pathExists(path.join(destinationRootAbs, "forms", `${variant}.cls`))) hints.formCls = true;
+      if (!hints.reportCls && await this.pathExists(path.join(destinationRootAbs, "reports", `${variant}.cls`))) hints.reportCls = true;
+      if (!hints.formText && await this.pathExists(path.join(destinationRootAbs, "forms", `${variant}.form.txt`))) hints.formText = true;
+      if (!hints.reportText && await this.pathExists(path.join(destinationRootAbs, "reports", `${variant}.report.txt`))) hints.reportText = true;
+      if (!hints.classCls && await this.pathExists(path.join(destinationRootAbs, "classes", `${variant}.cls`))) hints.classCls = true;
+      if (!hints.moduleBas && await this.pathExists(path.join(destinationRootAbs, "modules", `${variant}.bas`))) hints.moduleBas = true;
+    }
+
+    return hints;
+  }
+
+  async assertImportCodeTargetsAreDocumentModules(moduleNames, destinationRootAbs) {
+    const invalid = [];
+    const hintsByModule = new Map();
+
+    for (const mod of moduleNames) {
+      const hints = await this.getImportCodeHints(mod, destinationRootAbs);
+      hintsByModule.set(mod, hints);
+
+      const looksDocument =
+        /^Form_|^Report_/.test(mod) ||
+        hints.formCls ||
+        hints.reportCls ||
+        hints.formText ||
+        hints.reportText;
+
+      const looksStandard = hints.classCls || hints.moduleBas;
+
+      if (!looksDocument && looksStandard) {
+        invalid.push(mod);
+      }
+    }
+
+    if (invalid.length === 0) return;
+
+    const details = invalid.map((mod) => {
+      const hints = hintsByModule.get(mod) || {};
+      const found = [];
+      if (hints.classCls) found.push("classes/*.cls");
+      if (hints.moduleBas) found.push("modules/*.bas");
+      return `${mod}${found.length ? ` (${found.join(", ")})` : ""}`;
+    });
+
+    throw new Error(
+      `import-code solo sirve para code-behind de formularios/reportes. ` +
+      `Estos módulos parecen clases/módulos normales: ${details.join(", ")}. ` +
+      `Usá 'import' para ellos. Si mezclaste tipos, separá la lista: ` +
+      `'import-code <Form_/Report_...>' y 'import <clases/módulos>'.`
+    );
   }
 
   printExportOverwriteWarning(actionLabel) {
@@ -443,6 +532,10 @@ class AccessVbaSyncSkill {
 
     const mods = uniq((moduleNames || []).map(String).filter(Boolean));
     if (mods.length === 0) throw new Error("No se especificaron módulos para importar.");
+
+    if (importMode === "Code") {
+      await this.assertImportCodeTargetsAreDocumentModules(mods, destinationRootAbs);
+    }
 
     // Para import Auto seguimos sincronizando sidecars locales.
     // En import Code, VBAManager ya reconstruye el documento desde el binario
