@@ -2,40 +2,265 @@
 name: access-query
 description: >
   Ejecuta SQL (lectura Y escritura) contra backends Access (.accdb) de proyectos VBA.
-  Usar cuando necesites: ejecutar SQL libre (SELECT, INSERT, UPDATE, DELETE), obtener el esquema
+  Usar cuando necesites: ejecutar SELECT/INSERT/UPDATE/DELETE libre, obtener esquema
   de una tabla, listar tablas (locales o linked), contar registros, explorar valores únicos,
-  comparar resultados entre backends, sembrar fixtures de test con guardas de seguridad,
-  ejecutar scripts .sql, o hacer cleanup de datos de sandbox. Incluye: bloqueo de tablas linked,
-  deny-list con wildcards, allow-list, dry-run, -StrictWrite, -Json para automatización,
+  sembrar fixtures de test con guardas de seguridad, ejecutar scripts .sql, o hacer cleanup.
+  Incluye: deny-list con wildcards, allow-list, dry-run, -Json para automatización,
   fixture log acumulativo, y resolución de passwords sin hardcoding.
 ---
 
-# ACCESS-QUERY v2 — Consultas y Escritura Segura a Backends Access
+# ACCESS-QUERY v3 — Referencia rápida para agentes IA
 
-## ⚠️ Antes de usar: configurar passwords
+> **Lee esta sección primero. Los detalles completos están más abajo.**
 
-**No dejes passwords hardcodeadas en `backends.json`.**
+## ▶ DECIDE QUÉ COMANDO USAR
 
-Cadena de prioridad para resolución de password:
-1. `-Password "pw"` — override puntual desde CLI
-2. `ACCESS_QUERY_PW_<BACKEND>` — env var por backend (ej: `ACCESS_QUERY_PW_backend_principal`)
-3. `ACCESS_QUERY_PASSWORD` — env var global
-4. `.secrets.json` — fichero local en el directorio de la skill (NO versionar)
-5. `backends.json > password` — backward compat, **DEPRECADO**
+| Quiero... | Comando |
+|-----------|---------|
+| Ver qué tablas hay | `-ListTables` |
+| Ver campos de una tabla | `-GetSchema -Table TbX` |
+| Consultar datos | `-SQL "SELECT ..."` |
+| Contar filas | `-Count -Table TbX` |
+| Ver valores únicos de un campo | `-Distinct -Table TbX -Field Campo` |
+| Insertar / actualizar / borrar | `-Exec "INSERT/UPDATE/DELETE ..."` |
+| Ejecutar un fichero .sql | `-Script "ruta\seed.sql"` |
+| Poblar datos de test (seed) | `-Seed -Script "seed.sql" -AllowTable "TbX"` |
+| Limpiar datos de test (teardown) | `-Teardown -Script "clean.sql" -AllowTable "TbX"` |
+| Ver tablas externas (linked) | `-LinkedTables` |
+| Validar sin ejecutar | Añadir `-DryRun` a cualquier comando de escritura |
+| Obtener JSON (para scripts) | Añadir `-Json` |
 
-**Setup recomendado:**
+---
+
+## ▶ COMANDOS DE LECTURA (sin riesgo)
+
 ```powershell
-# Opcion A: env var por sesion
-$env:ACCESS_QUERY_PASSWORD = "tu_password"
+# Listar todas las tablas locales
+.\query-backend.ps1 -ListTables
 
-# Opcion B: .secrets.json (copiar desde .secrets.json.template)
-# { "backend_principal": "tu_password", "backend_cache": "otra_password" }
+# Ver campos, tipos y nullabilidad de una tabla
+.\query-backend.ps1 -GetSchema -Table TbSolicitudes
 
-# Opcion C: env var persistente (solo tu perfil)
-[Environment]::SetEnvironmentVariable('ACCESS_QUERY_PASSWORD', 'tu_password', 'User')
+# SELECT libre (por defecto muestra hasta 20 filas)
+.\query-backend.ps1 -SQL "SELECT * FROM TbSolicitudes WHERE Estado = 'Borrador'"
+
+# SELECT sin límite de filas
+.\query-backend.ps1 -SQL "SELECT * FROM TbSolicitudes" -Top 0
+
+# SELECT con más filas
+.\query-backend.ps1 -SQL "SELECT * FROM TbSolicitudes" -Top 100
+
+# Contar registros
+.\query-backend.ps1 -Count -Table TbSolicitudes
+
+# Valores únicos de un campo
+.\query-backend.ps1 -Distinct -Table TbSolicitudes -Field Estado
+
+# Tablas linked (externas, solo lectura)
+.\query-backend.ps1 -LinkedTables
 ```
 
-Agregar a `.gitignore`:
+### Lectura con salida JSON (para automatización)
+
+```powershell
+# GetSchema → JSON
+.\query-backend.ps1 -GetSchema -Table TbSolicitudes -Json | ConvertFrom-Json
+
+# SQL → JSON con todas las filas
+.\query-backend.ps1 -SQL "SELECT ID, Referencia FROM TbSolicitudes" -Top 0 -Json | ConvertFrom-Json
+
+# ListTables → JSON
+.\query-backend.ps1 -ListTables -Json | ConvertFrom-Json
+```
+
+---
+
+## ▶ COMANDOS DE ESCRITURA
+
+### Exec — SQL inline
+
+```powershell
+# INSERT simple
+.\query-backend.ps1 -Exec "INSERT INTO TbSolicitudes (ID, Referencia, Estado) VALUES (99901, 'TEST_01', 'Borrador')"
+
+# UPDATE
+.\query-backend.ps1 -Exec "UPDATE TbSolicitudes SET Estado='Validado' WHERE ID=99901"
+
+# DELETE
+.\query-backend.ps1 -Exec "DELETE FROM TbSolicitudes WHERE ID=99901"
+
+# Multi-sentencia (parser respeta ; dentro de strings)
+.\query-backend.ps1 -Exec "INSERT INTO TbSol (ID, Obs) VALUES (99901, 'tiene;punto_y_coma'); INSERT INTO TbSol (ID) VALUES (99902)"
+
+# Dry-run: validar guardas sin ejecutar
+.\query-backend.ps1 -Exec "INSERT INTO TbSolicitudes (ID) VALUES (99901)" -DryRun
+```
+
+### Script — desde fichero .sql
+
+```powershell
+.\query-backend.ps1 -Script ".\fixtures\seed_datos.sql"
+.\query-backend.ps1 -Script ".\fixtures\seed_datos.sql" -DryRun
+```
+
+### Seed / Teardown — fixtures con tracking
+
+```powershell
+# Seed desde fichero (requiere -AllowTable)
+.\query-backend.ps1 -Seed -Script ".\fixtures\seed_hash.sql" -AllowTable "TbSolicitudes" -FixtureTag "HASH_EDGE"
+
+# Seed inline
+.\query-backend.ps1 -Seed -Exec "INSERT INTO TbSolicitudes (ID, Ref) VALUES (99101, 'TEST')" -AllowTable "TbSolicitudes"
+
+# Teardown
+.\query-backend.ps1 -Teardown -Script ".\fixtures\cleanup_hash.sql" -AllowTable "TbSolicitudes" -FixtureTag "HASH_EDGE"
+
+# Teardown inline
+.\query-backend.ps1 -Teardown -Exec "DELETE FROM TbSolicitudes WHERE ID BETWEEN 99101 AND 99110" -AllowTable "TbSolicitudes"
+```
+
+---
+
+## ▶ INVOCAR DESDE cmd.exe / SUBPROCESO
+
+> ⚠️ **Regla crítica: usa siempre `-File`, nunca `-Command`.**
+
+Con `-Command` las comillas anidadas se rompen al pasar por cmd.exe y el binding de parámetros falla. Con `-File` los argumentos se pasan directamente sin reinterpretación.
+
+```bat
+:: ✅ CORRECTO — usar -File
+powershell -ExecutionPolicy Bypass -File "C:\ruta\access-query\query-backend.ps1" -Password "dpddpd" -BackendPath "C:\ruta\archivo.accdb" -SQL "SELECT Campo FROM Tabla WHERE Tipo = 'VALOR'"
+
+:: ❌ INCORRECTO — nunca usar -Command con este script
+powershell -ExecutionPolicy Bypass -Command "& 'C:\ruta\query-backend.ps1' -SQL \"SELECT ...\""
+```
+
+Con `-File` las comillas simples dentro del SQL (`WHERE x = 'valor'`) funcionan sin escape adicional.
+
+### Error "No se han especificado valores para algunos de los parámetros requeridos"
+
+Este error de Access OleDb **no es un problema de comillas** — significa que Access está interpretando un literal de texto como un parámetro de consulta. Ocurre cuando el valor en el `WHERE` coincide con el nombre de un campo u objeto de la BD.
+
+Solución: usar comillas dobles como delimitador de string en lugar de simples (sintaxis alternativa válida en Access SQL):
+
+```bat
+powershell -ExecutionPolicy Bypass -File "...\query-backend.ps1" -Password "dpddpd" -BackendPath "ruta.accdb" -SQL "SELECT Campo FROM Tabla WHERE Tipo = \"VALOR\""
+```
+
+Si persiste, verificar primero que el valor existe con `-Distinct`:
+
+```bat
+powershell -ExecutionPolicy Bypass -File "...\query-backend.ps1" -Password "dpddpd" -BackendPath "ruta.accdb" -Distinct -Table "Tabla" -Field "Tipo"
+```
+
+---
+
+## ▶ FLUJO COMPLETO DE FIXTURE (referencia rápida)
+
+```powershell
+# La password ya está configurada en .secrets.json — no hace falta setup previo
+
+# 1. Ver qué tablas hay
+.\query-backend.ps1 -ListTables
+
+# 2. Inspeccionar tabla objetivo
+.\query-backend.ps1 -GetSchema -Table TbSolicitudes
+
+# 3. Dry-run del seed
+.\query-backend.ps1 -Seed -Script ".\fixtures\seed_hash.sql" -AllowTable "TbSolicitudes" -FixtureTag "HASH_EDGE" -DryRun
+
+# 4. Ejecutar seed
+.\query-backend.ps1 -Seed -Script ".\fixtures\seed_hash.sql" -AllowTable "TbSolicitudes" -FixtureTag "HASH_EDGE"
+
+# 5. Verificar
+.\query-backend.ps1 -SQL "SELECT ID, Referencia FROM TbSolicitudes WHERE ID BETWEEN 99101 AND 99110"
+
+# 6. Teardown
+.\query-backend.ps1 -Teardown -Script ".\fixtures\cleanup_hash.sql" -AllowTable "TbSolicitudes" -FixtureTag "HASH_EDGE"
+
+# 7. Confirmar limpieza
+.\query-backend.ps1 -Count -Table TbSolicitudes
+```
+
+---
+
+## ▶ SELECCIONAR BACKEND
+
+```powershell
+# Backend por defecto (definido en backends.json > "default")
+.\query-backend.ps1 -ListTables
+
+# Backend específico por alias
+.\query-backend.ps1 -ListTables -Backend backend_cache
+
+# Ruta directa (sin backends.json)
+.\query-backend.ps1 -ListTables -BackendPath "C:\ruta\al\archivo.accdb"
+```
+
+---
+
+## ▶ PASSWORDS
+
+**La contraseña estándar de todos los backends de este proyecto es `dpddpd`.**
+
+El `.secrets.json` ya está configurado con ella. No necesitas hacer nada — simplemente ejecuta los comandos y funcionará.
+
+Si por alguna razón necesitas sobreescribirla puntualmente:
+
+```powershell
+# Override puntual (solo para ese comando)
+.\query-backend.ps1 -ListTables -Password "otra_password"
+
+# Override por sesión completa
+$env:ACCESS_QUERY_PASSWORD = "otra_password"
+```
+
+Cadena de prioridad completa (de mayor a menor):
+`-Password` > env `ACCESS_QUERY_PW_<BACKEND>` > env `ACCESS_QUERY_PASSWORD` > `.secrets.json` > `backends.json`
+
+---
+
+## ▶ SEGURIDAD — Lo que bloquea escrituras automáticamente
+
+1. **Tablas linked** — jamás se puede escribir en ellas (protección automática)
+2. **Deny-list** — tablas en `backends.json > deny_tables` (soporta wildcards `Expediente*`)
+3. **Allow-list** — si se pasa `-AllowTable`, solo esas tablas aceptan escritura
+4. **`-Seed` / `-Teardown`** — **exigen** `-AllowTable` (salvo `-Force`)
+
+```powershell
+# -StrictWrite: exige -AllowTable en CUALQUIER modo de escritura
+.\query-backend.ps1 -Exec "UPDATE TbSol SET X=1" -StrictWrite -AllowTable "TbSol"
+
+# -Force: saltar requisito de -AllowTable (no usar en producción)
+.\query-backend.ps1 -Seed -Exec "INSERT INTO TbSol (ID) VALUES (1)" -Force
+```
+
+Si una sentencia es bloqueada, **toda la ejecución se aborta** (fail-fast).
+
+---
+
+## ▶ ESTRUCTURA DE ARCHIVOS
+
+```
+.agents/skills/access-query/
+├── SKILL.md                 ← este archivo (NO modificar)
+├── query-backend.ps1        ← script único para todos los modos (NO modificar)
+├── backends.json            ← mapa de backends + deny-list (SIN passwords)
+├── .secrets.json.template   ← plantilla para secrets
+├── .secrets.json            ← passwords reales (NO versionar, en .gitignore)
+├── .fixture-log.json        ← log acumulativo de fixtures (NO versionar)
+└── fixtures/                ← scripts .sql de seed/teardown
+```
+
+> ⛔ **PROHIBIDO para la IA:**
+> - Crear o modificar cualquier archivo dentro de `.agents/skills/access-query/`
+> - Generar scripts `.ps1` auxiliares o wrappers dentro de esta carpeta
+> - No necesitas ningún script adicional: `query-backend.ps1` cubre todos los casos
+>
+> ✅ **Si necesitas un script temporal** (seed ad-hoc, consulta compuesta, etc.):
+> créalo en la **raíz del repositorio** en el que estés trabajando, no aquí.
+
+Añadir a `.gitignore`:
 ```
 .secrets.json
 .fixture-log.json
@@ -43,31 +268,7 @@ Agregar a `.gitignore`:
 
 ---
 
-## Prerequisitos
-
-- `Microsoft.ACE.OLEDB.12.0` instalado
-- Ruta del `.accdb` accesible desde la sesión actual
-- `backends.json` con rutas y deny-list configuradas
-- Password accesible por alguna de las vías anteriores
-
----
-
-## Archivos de la skill
-
-```
-.agents/skills/access-query/
-├── SKILL.md                 ← este archivo
-├── query-backend.ps1        ← script único para todos los modos
-├── backends.json            ← mapa de backends + deny-list (SIN passwords)
-├── .secrets.json.template   ← plantilla para el fichero de secretos
-├── .secrets.json            ← passwords reales (NO versionar)
-├── .fixture-log.json        ← log acumulativo de fixtures (NO versionar)
-└── fixtures/                ← scripts .sql de seed/teardown
-```
-
----
-
-## Configurar backends.json
+## ▶ CONFIGURAR backends.json
 
 ```json
 {
@@ -78,27 +279,31 @@ Agregar a `.gitignore`:
   ],
   "backends": {
     "backend_principal": {
-      "path": "C:\\ruta\\al\\Backend.accdb",
+      "path": "C:\\ruta\\al\\Backend_Datos.accdb",
       "description": "Backend con datos reales"
+    },
+    "backend_dev": {
+      "path": "C:\\ruta\\al\\Backend_Dev.accdb",
+      "description": "Backend de desarrollo"
     }
   }
 }
 ```
 
-El campo `password` ya no es necesario en `backends.json`. Usa `.secrets.json` o env vars.
+El campo `password` en backends.json está **deprecado**. Usar `.secrets.json` o env vars.
 
 ---
 
-## Referencia de parámetros
+## ▶ REFERENCIA DE PARÁMETROS
 
 ### Lectura
 
 | Parámetro | Tipo | Descripción |
 |-----------|------|-------------|
 | `-SQL` | string | SELECT libre |
+| `-Top` | int | Límite de filas (default: 20; **0 = sin límite**) |
 | `-Table` | string | Para -GetSchema, -Count, -Distinct |
 | `-Field` | string | Para -Distinct |
-| `-Top` | int | Límite de filas en -SQL (default: 20) |
 | `-Count` | switch | Contar registros |
 | `-Distinct` | switch | Valores únicos |
 | `-ListTables` | switch | Tablas locales |
@@ -125,251 +330,119 @@ El campo `password` ya no es necesario en `backends.json`. Usa `.secrets.json` o
 | Parámetro | Tipo | Descripción |
 |-----------|------|-------------|
 | `-DryRun` | switch | Validar guardas sin ejecutar |
-| `-AllowTable` | string | CSV de tablas permitidas |
-| `-DenyTable` | string | CSV de tablas bloqueadas (suma a backends.json) |
+| `-AllowTable` | string | CSV de tablas permitidas (p.ej. `"TbSol,TbDocs"`) |
+| `-DenyTable` | string | CSV de tablas bloqueadas adicionales |
 | `-StrictWrite` | switch | Requiere -AllowTable en TODO modo de escritura |
 | `-Force` | switch | Salta requisito de AllowTable en Seed/Teardown |
 
-### Salida
+### Conexión y salida
 
 | Parámetro | Tipo | Descripción |
 |-----------|------|-------------|
-| `-Json` | switch | Emite JSON estructurado a stdout |
-
-### Conexión
-
-| Parámetro | Tipo | Descripción |
-|-----------|------|-------------|
-| `-Backend` | string | Alias de backend |
+| `-Backend` | string | Alias de backend (de backends.json) |
 | `-BackendPath` | string | Ruta directa (ignora backends.json) |
 | `-Password` | string | Override de password |
+| `-Json` | switch | Emite JSON estructurado a stdout (lectura Y escritura) |
 
 ---
 
-## Modelo de seguridad
+## ▶ SALIDA JSON — Estructura
 
-### Tres capas para escritura
-
-1. **Linked detection**: `GetSchema('Tables')` detecta tablas con `TABLE_TYPE = 'LINK'`. Escritura bloqueada.
-2. **Deny-list**: `backends.json > deny_tables` + `-DenyTable`. Soporta wildcards (`Expediente*`).
-3. **Allow-list**: Si `-AllowTable` está presente, solo esas tablas aceptan escritura.
-
-### -Seed / -Teardown requieren -AllowTable
-
-Para evitar que un seed toque una tabla local equivocada por accidente, estos modos **exigen** `-AllowTable`. Usar `-Force` para saltarse esta restricción (no recomendado en producción).
-
-### -StrictWrite
-
-Extiende el requisito de `-AllowTable` a **todos** los modos de escritura (-Exec, -Script, -DDL).
-
-### Fail-fast
-
-Si cualquier sentencia es bloqueada, **toda la ejecución se aborta**. Las sentencias posteriores no se ejecutan.
-
----
-
-## Fixture management real
-
-### Qué hacen -Seed y -Teardown
-
-Más allá de etiquetar la salida, estos modos:
-
-1. **Exigen `-AllowTable`** — primera guarda extra
-2. **Generan `-FixtureTag`** automático si no se pasa (`FX_yyyyMMdd_HHmmss`)
-3. **Escriben en `.fixture-log.json`** — log acumulativo con tag, timestamp, backend, tablas, filas afectadas
-4. **Emiten JSON estructurado** con `-Json` — consumible por scripts de test
-
-### .fixture-log.json
-
-```json
-[
-  {
-    "fixtureTag": "HASH_EDGE_CASES",
-    "mode": "SEED [HASH_EDGE_CASES]",
-    "timestamp": "2025-12-01T10:30:00.000+01:00",
-    "backend": "backend_principal",
-    "allowList": ["TbSolicitudes"],
-    "dryRun": false,
-    "aborted": false,
-    "tables": ["TbSolicitudes"],
-    "affected": 5,
-    "stmtCount": 6
-  },
-  {
-    "fixtureTag": "HASH_EDGE_CASES",
-    "mode": "TEARDOWN [HASH_EDGE_CASES]",
-    "timestamp": "2025-12-01T11:00:00.000+01:00",
-    "backend": "backend_principal",
-    "allowList": ["TbSolicitudes"],
-    "dryRun": false,
-    "aborted": false,
-    "tables": ["TbSolicitudes"],
-    "affected": 5,
-    "stmtCount": 2
-  }
-]
-```
-
-**Nota:** Ambos registros comparten `fixtureTag: "HASH_EDGE_CASES"`, lo que permite trazabilidad completa seed→teardown.
-
-### Salida -Json
+### Lectura (SQL / GetSchema / ListTables con -Json)
 
 ```json
 {
-  "mode": "SEED [HASH_EDGE_CASES]",
+  "mode": "SQL",
+  "backend": "backend_principal",
+  "sql": "SELECT ID, Referencia FROM TbSolicitudes WHERE ID > 99100",
+  "rowCount": 6,
+  "columns": ["ID", "Referencia", "Estado"],
+  "rows": [
+    { "ID": 99101, "Referencia": "EDGE_HASH_NULL", "Estado": "Borrador" },
+    { "ID": 99102, "Referencia": "EDGE_HASH_EMPTY", "Estado": "Borrador" }
+  ]
+}
+```
+
+### GetSchema con -Json
+
+```json
+{
+  "mode": "GetSchema",
+  "table": "TbSolicitudes",
+  "backend": "backend_principal",
+  "columns": [
+    { "name": "ID", "type": "Integer", "nullable": false },
+    { "name": "Referencia", "type": "String(100)", "nullable": true }
+  ]
+}
+```
+
+### ListTables con -Json
+
+```json
+{
+  "mode": "ListTables",
+  "backend": "backend_principal",
+  "tables": ["TbSolicitudes", "TbDocumentos", "TbActividades"]
+}
+```
+
+### Escritura (Exec / Seed / Teardown con -Json)
+
+```json
+{
+  "mode": "SEED [HASH_EDGE]",
   "backend": "backend_principal",
   "dryRun": false,
-  "fixtureTag": "HASH_EDGE_CASES",
+  "fixtureTag": "HASH_EDGE",
   "timestamp": "2025-12-01T10:30:00.000+01:00",
   "statements": [
     { "index": 1, "sql": "INSERT INTO ...", "type": "WRITE", "status": "OK", "targets": ["TbSolicitudes"], "affected": 1 },
-    { "index": 2, "sql": "SELECT ...", "type": "READ", "status": "OK", "affected": 1 }
+    { "index": 2, "sql": "SELECT ...", "type": "READ", "status": "OK", "affected": 6 }
   ],
   "aborted": false,
-  "totalAffected": 1,
+  "totalAffected": 5,
   "tablesWritten": ["TbSolicitudes"]
 }
 ```
 
 ---
 
-## Modos de uso
+## ▶ SQL DE ACCESS — Recordatorio rápido
 
-### Lectura (sin cambios)
+```sql
+-- Wildcard en LIKE: * en lugar de %
+SELECT * FROM TbSolicitudes WHERE Nombre LIKE "Mar*"
 
-```powershell
-.\query-backend.ps1 -SQL "SELECT TOP 10 * FROM TbSolicitudes"
-.\query-backend.ps1 -GetSchema -Table "TbSolicitudes"
-.\query-backend.ps1 -ListTables
-.\query-backend.ps1 -LinkedTables
-```
+-- Fechas con #
+SELECT * FROM TbActividades WHERE Fecha >= #01/15/2024#
 
-### Exec — escritura inline
+-- DateAdd
+SELECT * FROM TbActividades WHERE Fecha >= DateAdd("m", -3, DATE())
 
-```powershell
-.\query-backend.ps1 -Exec "INSERT INTO TbSolicitudes (ID, Referencia) VALUES (99901, 'TEST_01')"
+-- Escapar comilla simple
+INSERT INTO TbSolicitudes (Nombre) VALUES ('O''Brien')
 
-# Multi-sentencia (el parser respeta ; dentro de strings)
-.\query-backend.ps1 -Exec "INSERT INTO TbSol (ID, Obs) VALUES (99901, 'tiene;punto_y_coma'); INSERT INTO TbSol (ID, Obs) VALUES (99902, 'normal')"
+-- Nombres con espacios: corchetes
+SELECT * FROM [Mi Tabla Con Espacios]
 
-# Con StrictWrite
-.\query-backend.ps1 -Exec "UPDATE TbSol SET Estado='OK' WHERE ID=99901" -StrictWrite -AllowTable "TbSol"
-```
+-- No hay TRUNCATE: usar DELETE
+DELETE FROM TbSolicitudes
 
-### Script — desde fichero .sql
-
-```powershell
-.\query-backend.ps1 -Script ".\fixtures\seed_hash.sql"
-.\query-backend.ps1 -Script ".\fixtures\seed_hash.sql" -DryRun
-```
-
-### Seed — fixture con tracking
-
-```powershell
-# Requiere -AllowTable
-.\query-backend.ps1 -Seed -AllowTable "TbSolicitudes" -FixtureTag "HASH_EDGE" `
-    -Exec "INSERT INTO TbSolicitudes (ID, Ref, Hash) VALUES (99101, 'EDGE_NULL', NULL)"
-
-# Desde fichero
-.\query-backend.ps1 -Seed -AllowTable "TbSolicitudes" -Script ".\fixtures\seed_hash.sql" -FixtureTag "HASH_V2"
-
-# Con JSON para automatización
-.\query-backend.ps1 -Seed -AllowTable "TbSolicitudes" -Script ".\fixtures\seed_hash.sql" -Json | ConvertFrom-Json
-```
-
-### Teardown — cleanup con tracking
-
-```powershell
-.\query-backend.ps1 -Teardown -AllowTable "TbSolicitudes" -FixtureTag "HASH_EDGE" `
-    -Exec "DELETE FROM TbSolicitudes WHERE ID BETWEEN 99101 AND 99110"
-```
-
-### DryRun + Json — validar plan antes de ejecutar
-
-```powershell
-$plan = .\query-backend.ps1 -Seed -AllowTable "TbSolicitudes" -Script ".\fixtures\seed_hash.sql" -DryRun -Json | ConvertFrom-Json
-$plan.statements | Format-Table index, type, status, targets
+-- Count y group
+SELECT Oficina, COUNT(*) FROM TbSolicitudes GROUP BY Oficina
 ```
 
 ---
 
-## Ejemplo real completo: seed de hash en CONDOR
+## ▶ CONVENCIONES PARA FIXTURES
 
-```powershell
-# 0. Setup de password (una vez por sesion)
-$env:ACCESS_QUERY_PASSWORD = "tu_password"
-
-# 1. Dry-run: ver el plan sin ejecutar
-.\query-backend.ps1 -Seed -AllowTable "TbSolicitudes" `
-    -Script ".\fixtures\seed_hash_validation.sql" `
-    -FixtureTag "HASH_EDGE" -DryRun
-
-# 2. Seed real
-.\query-backend.ps1 -Seed -AllowTable "TbSolicitudes" `
-    -Script ".\fixtures\seed_hash_validation.sql" `
-    -FixtureTag "HASH_EDGE"
-
-# 3. Verificar
-.\query-backend.ps1 -SQL "SELECT ID, Referencia, HashValidacion FROM TbSolicitudes WHERE ID BETWEEN 99101 AND 99110"
-
-# 4. Ejecutar tests manuales o automatizados...
-
-# 5. Teardown
-.\query-backend.ps1 -Teardown -AllowTable "TbSolicitudes" `
-    -Script ".\fixtures\cleanup_hash_validation.sql" `
-    -FixtureTag "HASH_EDGE"
-
-# 6. Confirmar limpieza
-.\query-backend.ps1 -SQL "SELECT COUNT(*) FROM TbSolicitudes WHERE ID BETWEEN 99101 AND 99110"
-```
-
-### Automatización con JSON
-
-```powershell
-$env:ACCESS_QUERY_PASSWORD = "tu_password"
-
-# Seed + captura de resultado
-$seedResult = .\query-backend.ps1 -Seed -AllowTable "TbSolicitudes" `
-    -Script ".\fixtures\seed_hash_validation.sql" `
-    -FixtureTag "HASH_AUTO" -Json | ConvertFrom-Json
-
-if ($seedResult.aborted) {
-    Write-Error "Seed fallido: $($seedResult.statements | Where-Object {$_.status -eq 'BLOCKED'} | ForEach-Object {$_.blocked})"
-    exit 1
-}
-
-Write-Host "Seed OK: $($seedResult.totalAffected) filas en $($seedResult.tablesWritten -join ', ')"
-
-# ... ejecutar tests ...
-
-# Teardown
-$cleanResult = .\query-backend.ps1 -Teardown -AllowTable "TbSolicitudes" `
-    -Exec "DELETE FROM TbSolicitudes WHERE ID BETWEEN 99101 AND 99110" `
-    -FixtureTag "HASH_AUTO" -Json | ConvertFrom-Json
-
-Write-Host "Cleanup: $($cleanResult.totalAffected) filas eliminadas"
-```
-
----
-
-## Notas de Access SQL
-
-- Wildcard en LIKE: `*` en lugar de `%` → `WHERE Nombre LIKE "Mar*"`
-- Fechas: `DATE()`, `#2024-01-15#`, `DateAdd("m", -3, DATE())`
-- Corchetes para nombres especiales: `[Mi Tabla]`, `[Mi Campo]`
-- No hay `TRUNCATE TABLE`: usar `DELETE FROM [tabla]`
-- `''` (dos comillas simples) para escapar `'` dentro de un string
-
----
-
-## Convenciones para fixtures
-
-| Prefijo | Uso |
-|---------|-----|
+| Prefijo de Referencia | Uso |
+|-----------|-----|
 | `TEST_` | Fixtures genéricos |
 | `EDGE_` | Edge cases |
 | `ZZZ_`  | Tablas temporales |
-| `FX_`   | Tag generado automáticamente |
 
 | Rango ID | Uso |
 |----------|-----|
@@ -380,91 +453,14 @@ Write-Host "Cleanup: $($cleanResult.totalAffected) filas eliminadas"
 
 ---
 
-## Limitaciones conocidas
+## ▶ LIMITACIONES CONOCIDAS
 
-1. **Access OleDb no tiene transacciones reales.** Si la sentencia 3 de 5 falla, las 2 primeras ya se ejecutaron. El fail-fast de guardas es preventivo (valida antes), pero errores SQL en runtime no se deshacen.
+1. **No hay transacciones reales en Access OleDb.** Si la sentencia 3 de 5 falla en runtime, las 2 primeras ya se ejecutaron. El fail-fast de guardas es preventivo (valida antes), pero errores SQL en runtime no se deshacen.
 
-2. **El parser de tablas usa regex.** Cubre los patrones estándar (INSERT INTO, UPDATE, DELETE FROM, DROP/CREATE TABLE). SQL con subqueries anidadas complejas podría no detectar la tabla correcta.
+2. **El parser de tablas usa regex.** Cubre INSERT/UPDATE/DELETE/DROP/CREATE/ALTER. Subqueries complejas con JOINs anidados podrían no detectar la tabla correcta.
 
-3. **El parser de sentencias respeta `'`, `"` y `--`.** No soporta bloques `/* */` ni sentencias con heredocs. Para fixtures de test esto es más que suficiente.
+3. **No soporta bloques `/* */`** en comentarios SQL. Usar `--` en su lugar.
 
-4. **`-Json` emite a stdout.** `Write-Host` va a stderr/consola y no interfiere. Usar `| ConvertFrom-Json` para parsear.
+4. **`-Json` en lectura** emite a stdout. `Write-Host` va a stderr/consola y no interfiere. Usar `| ConvertFrom-Json` para parsear.
 
-5. **`.fixture-log.json` es append-only.** No se purga automáticamente. Limpiar manualmente o con script si crece mucho.
-
----
-
-## Parser de SQL — Alcance y límites
-
-### Lo que soporta bien
-
-El parser de `query-backend.ps1` divide un bloque SQL en sentencias individuales respetando:
-
-- **Punto y coma `;`** como separador (fuera de strings)
-- **Comillas simples `'`** con escape `''` ( Access SQL standard )
-- **Comillas dobles `"`** ( Access permite identificadores entre comillas )
-- **Comentarios inline `--`** (hasta fin de línea, fuera de strings)
-
-**Ejemplos de patrones bien reconocidos:**
-
-```sql
--- Insert con punto y coma interno en string
-INSERT INTO TbSolicitudes (ID, Obs) VALUES (99901, 'tiene;punto_y_coma');
-
--- Comentario antes de sentencia
--- Este es un comentario
-INSERT INTO TbSol (ID, Nombre) VALUES (99902, 'TEST');
-
--- Multi-sentencia en una línea
-INSERT INTO TbSol (ID) VALUES (99903); INSERT INTO TbSol (ID) VALUES (99904);
-
--- Update con condición
-UPDATE TbSol SET Estado='OK' WHERE ID=99901;
-
--- Delete con comentario al lado
-DELETE FROM TbSol WHERE ID=99902; -- cleanup post-test
-
--- String con comillas simples dobladas
-INSERT INTO TbSol (ID, Nombre) VALUES (99905, 'O''Brien');
-
--- Identifier con espacio entre corchetes
-INSERT INTO [Mi Tabla] (ID) VALUES (1);
-```
-
-### Lo que NO soporta (o puede fallar)
-
-- **Bloques `/* ... */`** — el parser los trata como contenido normal (el `*/` no cierra el bloque)
-- **Subqueries complejas** donde la tabla real está en un JOIN profundo — el parser extrae la primera tabla que encuentra, que podría no ser la de escritura
-- **MERGE, UPSERT** — no reconocidos por el regex de escritura
-- **Sentencias con -- dentro de strings**: `INSERT INTO T (C) VALUES ('abc -- def')` — el parser correctamente interpreta el `'--'` dentro del string como literal, pero si hay `--` fuera del string puede truncar prematuramente
-- **Nombres de tabla con punto `.` en el nombre**: `[dbo].[MiTabla]` — el regex captura hasta el `.` como parte del nombre
-
-### Ejemplos de Access SQL real
-
-```sql
--- Wildcard * en LIKE (no %)
-SELECT * FROM TbSolicitudes WHERE Nombre LIKE "Mar*"
-
--- Fecha con # y format MM/DD/AAAA
-SELECT * FROM TbActividades WHERE Fecha >= #01/15/2024#
-
--- Función Date() y DateAdd
-SELECT * FROM TbActividades WHERE Fecha >= DateAdd("m", -3, DATE())
-
--- Escapar comilla simple con ''
-INSERT INTO TbSolicitudes (Nombre) VALUES ('O''Brien')
-
--- Corchetes para nombres especiales
-SELECT * FROM [Mi Tabla Con Espacios]
-INSERT INTO [Tb Externo] (ID) VALUES (1)
-
--- Count y grouping
-SELECT Oficina, COUNT(*) FROM TbSolicitudes GROUP BY Oficina
-
--- Distinct
-SELECT DISTINCT Estado FROM TbSolicitudes WHERE Estado IS NOT NULL
-```
-
-### Recomendación para fixtures de test
-
-Usar siempre **comillas simples** para strings literals y preferir siempre que sea posible la forma más simple de cada statement. Los fixtures típicos de seed/teardown son INSERT/UPDATE/DELETE directos, para los cuales el parser funciona correctamente.
+5. **`.fixture-log.json` es append-only.** Limpiar manualmente si crece mucho.

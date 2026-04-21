@@ -1,31 +1,31 @@
 param(
     # -- Modos de lectura --
-    [Parameter(Mandatory=$false)] [string]$SQL,
-    [Parameter(Mandatory=$false)] [string]$Table,
-    [Parameter(Mandatory=$false)] [string]$Field,
-    [Parameter(Mandatory=$false)] [int]$Top,
+    [Parameter(Mandatory=$false)] [string]$SQL            = '',
+    [Parameter(Mandatory=$false)] [string]$Table          = '',
+    [Parameter(Mandatory=$false)] [string]$Field          = '',
+    [Parameter(Mandatory=$false)] [int]$Top               = -1,   # -1 = usar default 20; 0 = sin límite
     [Parameter(Mandatory=$false)] [switch]$Count,
     [Parameter(Mandatory=$false)] [switch]$Distinct,
     [Parameter(Mandatory=$false)] [switch]$ListTables,
     [Parameter(Mandatory=$false)] [switch]$LinkedTables,
     [Parameter(Mandatory=$false)] [switch]$GetSchema,
     [Parameter(Mandatory=$false)] [switch]$Compare,
-    [Parameter(Mandatory=$false)] [string]$CompareBackend,
-    [Parameter(Mandatory=$false)] [string]$CompareSQL,
+    [Parameter(Mandatory=$false)] [string]$CompareBackend = '',
+    [Parameter(Mandatory=$false)] [string]$CompareSQL     = '',
 
     # -- Modos de escritura --
-    [Parameter(Mandatory=$false)] [string]$Exec,
-    [Parameter(Mandatory=$false)] [string]$Script,
+    [Parameter(Mandatory=$false)] [string]$Exec           = '',
+    [Parameter(Mandatory=$false)] [string]$Script         = '',
     [Parameter(Mandatory=$false)] [switch]$Seed,
     [Parameter(Mandatory=$false)] [switch]$Teardown,
-    [Parameter(Mandatory=$false)] [string]$FixtureTag,
+    [Parameter(Mandatory=$false)] [string]$FixtureTag     = '',
     [Parameter(Mandatory=$false)] [switch]$CreateTable,
     [Parameter(Mandatory=$false)] [switch]$DropTable,
 
     # -- Guardas de seguridad --
     [Parameter(Mandatory=$false)] [switch]$DryRun,
-    [Parameter(Mandatory=$false)] [string]$AllowTable,
-    [Parameter(Mandatory=$false)] [string]$DenyTable,
+    [Parameter(Mandatory=$false)] [string]$AllowTable     = '',
+    [Parameter(Mandatory=$false)] [string]$DenyTable      = '',
     [Parameter(Mandatory=$false)] [switch]$StrictWrite,
     [Parameter(Mandatory=$false)] [switch]$Force,
 
@@ -33,25 +33,23 @@ param(
     [Parameter(Mandatory=$false)] [switch]$Json,
 
     # -- Conexion --
-    [Parameter(Mandatory=$false)] [string]$Backend = '',
-    [Parameter(Mandatory=$false)] [string]$BackendPath = '',
-    [Parameter(Mandatory=$false)] [string]$Password = ''
+    [Parameter(Mandatory=$false)] [string]$Backend        = '',
+    [Parameter(Mandatory=$false)] [string]$BackendPath    = '',
+    [Parameter(Mandatory=$false)] [string]$Password       = '__UNSET__'   # sentinel para distinguir "" de no-pasado
 )
 
 $ErrorActionPreference = 'Stop'
 
 # =============================================================================
-# FIX #0: VALIDACION EXPLÍCITA DE COMBINACIONES INCOMPATIBLES
-# Fail-fast con mensajes claros, antes del dispatcher.
+# VALIDACION DE COMBINACIONES INCOMPATIBLES
 # =============================================================================
+
 $validationErrors = @()
 
-# -- Solo un modo PRINCIPAL (selector de modo) a la vez --
-# Los switches de modo (-Seed, -Teardown) + parámetros con contenido (-SQL, -Exec, etc)
 $sqlModeProvided      = $SQL -ne ''
 $execModeProvided     = $Exec -ne ''
 $scriptModeProvided   = $Script -ne ''
-$compareModeProvided  = $CompareSQL -ne ''  # Compare se activa con -CompareSQL, no solo -Compare
+$compareModeProvided  = $CompareSQL -ne ''
 $listTablesProvided   = $ListTables
 $linkedTablesProvided = $LinkedTables
 $getSchemaProvided    = $GetSchema
@@ -64,103 +62,56 @@ $readModes = @($getSchemaProvided, $countProvided, $distinctProvided, $compareMo
                 $listTablesProvided, $linkedTablesProvided)
 $activeReadModes = ($readModes | Where-Object { $_ }).Count
 
-$writeModes = @($execModeProvided, $scriptModeProvided, $Seed, $Teardown, $createTableProvided, $dropTableProvided)
-$activeWriteModes = ($writeModes | Where-Object { $_ }).Count
-
-# Solo un read mode
 if ($activeReadModes -gt 1) {
     $validationErrors += "Solo puedes usar un modo de lectura a la vez (-GetSchema, -Count, -Distinct, -Compare, -ListTables, -LinkedTables)."
 }
-
-# Solo un write mode (que no sea Seed/Teardown que tienen su propia guarda)
 if ($execModeProvided -and $scriptModeProvided) {
     $validationErrors += "-Exec y -Script son mutuamente excluyentes (elige uno)."
 }
-
-# -- -SQL incompatible con modos de escritura Y lectura avanzada --
 if ($sqlModeProvided -and ($execModeProvided -or $scriptModeProvided)) {
     $validationErrors += "-SQL es modo de solo lectura: no puede combinarse con -Exec o -Script."
 }
 if ($sqlModeProvided -and $compareModeProvided) {
-    $validationErrors += "-SQL y -Compare son mutuamente excluyentes (son ambos de solo lectura, pero incompatibles)."
+    $validationErrors += "-SQL y -Compare son mutuamente excluyentes."
 }
-if ($sqlModeProvided -and $getSchemaProvided) {
-    $validationErrors += "-SQL y -GetSchema son mutuamente excluyentes."
+if ($sqlModeProvided -and ($getSchemaProvided -or $countProvided -or $distinctProvided -or $listTablesProvided -or $linkedTablesProvided)) {
+    $validationErrors += "-SQL no puede combinarse con otros modos de lectura."
 }
-if ($sqlModeProvided -and $countProvided) {
-    $validationErrors += "-SQL y -Count son mutuamente excluyentes."
-}
-if ($sqlModeProvided -and $distinctProvided) {
-    $validationErrors += "-SQL y -Distinct son mutuamente excluyentes."
-}
-if ($sqlModeProvided -and $listTablesProvided) {
-    $validationErrors += "-SQL y -ListTables son mutuamente excluyentes."
-}
-if ($sqlModeProvided -and $linkedTablesProvided) {
-    $validationErrors += "-SQL y -LinkedTables son mutuamente excluyentes."
-}
-
-# -- -GetSchema no puede usar -Exec --
 if ($getSchemaProvided -and $execModeProvided) {
     $validationErrors += "-GetSchema es modo de solo lectura: no puede combinarse con -Exec."
 }
-
-# -- -Compare (con -CompareSQL) no puede mezclarse con modos de escritura --
 if ($Compare -and ($execModeProvided -or $scriptModeProvided -or $Seed -or $Teardown)) {
-    $validationErrors += "-Compare es modo de solo lectura: no puede combinarse con -Exec, -Script, -Seed o -Teardown."
+    $validationErrors += "-Compare es modo de solo lectura."
 }
-
-# -- Seed/Teardown incompatibilidades --
-if ($Seed -and $Teardown) {
-    $validationErrors += "-Seed y -Teardown son mutuamente excluyentes. Elegir uno."
+if ($Seed -and $Teardown) { $validationErrors += "-Seed y -Teardown son mutuamente excluyentes." }
+if (($Seed -or $Teardown) -and ($createTableProvided -or $dropTableProvided)) {
+    $validationErrors += "-Seed/-Teardown no pueden combinarse con DDL (-CreateTable/-DropTable)."
 }
-if ($Seed -and $createTableProvided) {
-    $validationErrors += "-Seed no puede combinarse con -CreateTable (son DDL, no fixtures)."
-}
-if ($Seed -and $dropTableProvided) {
-    $validationErrors += "-Seed no puede combinarse con -DropTable (son DDL, no fixtures)."
-}
-if ($Teardown -and $createTableProvided) {
-    $validationErrors += "-Teardown no puede combinarse con -CreateTable (son DDL, no fixtures)."
-}
-if ($Teardown -and $dropTableProvided) {
-    $validationErrors += "-Teardown no puede combinarse con -DropTable (son DDL, no fixtures)."
-}
-
-# -- DDL incompatibility --
 if ($createTableProvided -and $dropTableProvided) {
     $validationErrors += "-DropTable y -CreateTable son mutuamente excluyentes."
 }
 
-# -- Mostrar errores y abortar --
 if ($validationErrors.Count -gt 0) {
-    foreach ($err in $validationErrors) {
-        Write-Host "ERROR: $err" -ForegroundColor Red
-    }
+    foreach ($err in $validationErrors) { Write-Host "ERROR: $err" -ForegroundColor Red }
     Write-Host "Ejecuta '.\query-backend.ps1' sin argumentos para ver la ayuda." -ForegroundColor Yellow
     exit 1
 }
 
 # =============================================================================
-# FIX #1: DISPATCHER CENTRALIZADO
-# Resolver el modo UNA SOLA VEZ. Los modos compuestos (Seed+Exec, Teardown+Script)
-# se evaluan ANTES que los simples para evitar que -Exec absorba -Seed -Exec.
+# DISPATCHER
 # =============================================================================
 
 $Mode = $null
 $SqlInput = $null
 
-# -- Modos compuestos (mas especificos primero) --
 if     ($Seed -and $Exec)            { $Mode = 'Seed';      $SqlInput = $Exec }
 elseif ($Seed -and $Script)          { $Mode = 'Seed';      $SqlInput = '__FILE__' }
 elseif ($Teardown -and $Exec)        { $Mode = 'Teardown';  $SqlInput = $Exec }
 elseif ($Teardown -and $Script)      { $Mode = 'Teardown';  $SqlInput = '__FILE__' }
 elseif ($CreateTable -and $Exec)     { $Mode = 'DDL';       $SqlInput = $Exec }
 elseif ($DropTable -and $Table)      { $Mode = 'DDL';       $SqlInput = "DROP TABLE [$Table]" }
-# -- Modos simples de escritura --
 elseif ($Exec)                       { $Mode = 'Exec';      $SqlInput = $Exec }
 elseif ($Script)                     { $Mode = 'Script';    $SqlInput = '__FILE__' }
-# -- Modos de lectura --
 elseif ($ListTables)                 { $Mode = 'ListTables' }
 elseif ($LinkedTables)               { $Mode = 'LinkedTables' }
 elseif ($GetSchema -and $Table)      { $Mode = 'GetSchema' }
@@ -168,7 +119,6 @@ elseif ($Count -and $Table)          { $Mode = 'Count' }
 elseif ($Distinct -and $Table -and $Field) { $Mode = 'Distinct' }
 elseif ($Compare -and $CompareSQL)   { $Mode = 'Compare' }
 elseif ($SQL)                        { $Mode = 'SQL' }
-# -- Validaciones de combinaciones invalidas --
 elseif ($Seed)       { Write-Host 'ERROR: -Seed requiere -Exec "SQL" o -Script "ruta.sql"' -ForegroundColor Red; exit 1 }
 elseif ($Teardown)   { Write-Host 'ERROR: -Teardown requiere -Exec "SQL" o -Script "ruta.sql"' -ForegroundColor Red; exit 1 }
 elseif ($GetSchema)  { Write-Host 'ERROR: -GetSchema requiere -Table "nombre"' -ForegroundColor Red; exit 1 }
@@ -196,71 +146,61 @@ foreach ($prop in $config.backends.PSObject.Properties) {
     $backendMap[$prop.Name] = $prop.Value
 }
 
-# -- Deny-list global: backends.json + parametro CLI --
+# -- Deny-list global --
 $globalDenyTables = @()
-if ($config.PSObject.Properties['deny_tables']) {
-    $globalDenyTables = @($config.deny_tables)
-}
-if ($DenyTable) {
-    $globalDenyTables += ($DenyTable -split ',') | ForEach-Object { $_.Trim() }
-}
+if ($config.PSObject.Properties['deny_tables']) { $globalDenyTables = @($config.deny_tables) }
+if ($DenyTable) { $globalDenyTables += ($DenyTable -split ',') | ForEach-Object { $_.Trim() } }
 $globalDenyTables = $globalDenyTables | Select-Object -Unique
 
-# -- Allow-list desde parametro --
+# -- Allow-list --
 $allowTableList = @()
-if ($AllowTable) {
-    $allowTableList = ($AllowTable -split ',') | ForEach-Object { $_.Trim() }
-}
+if ($AllowTable) { $allowTableList = ($AllowTable -split ',') | ForEach-Object { $_.Trim() } }
 
 # =============================================================================
-# FIX #2: RESOLUCION DE PASSWORDS SIN HARDCODING
+# RESOLUCION DE PASSWORDS
 # Cadena de prioridad:
-#   1. -Password (CLI override)
+#   1. -Password (CLI override)  — si es '' explícito, se usa '' (sin password)
 #   2. Env var ACCESS_QUERY_PW_<BACKEND>
 #   3. Env var ACCESS_QUERY_PASSWORD (global)
-#   4. .secrets.json (fichero local, no versionar)
-#   5. backends.json > password (backward compat, DEPRECADO)
-#   6. Error claro
+#   4. .secrets.json
+#   5. backends.json > password (DEPRECADO)
+#   6. '' — sin password (BDs sin contraseña son comunes en desarrollo)
 # =============================================================================
 
 function Resolve-Password {
-    param(
-        [string]$BackendName,
-        [string]$CliPassword,
-        [string]$JsonPassword
-    )
-    # 1. CLI override
-    if ($CliPassword) { return $CliPassword }
+    param([string]$BackendName, [string]$CliPassword, [bool]$CliPasswordSet, [string]$JsonPassword)
+
+    # 1. CLI override explícito (incluyendo string vacío = sin password)
+    if ($CliPasswordSet) { return $CliPassword }
 
     # 2. Env var por backend
     $envPerBackend = "ACCESS_QUERY_PW_$($BackendName -replace '[^a-zA-Z0-9]','_')"
     $envVal = [System.Environment]::GetEnvironmentVariable($envPerBackend)
-    if ($envVal) { return $envVal }
+    if ($null -ne $envVal -and $envVal -ne '') { return $envVal }
 
     # 3. Env var global
     $envGlobal = [System.Environment]::GetEnvironmentVariable('ACCESS_QUERY_PASSWORD')
-    if ($envGlobal) { return $envGlobal }
+    if ($null -ne $envGlobal -and $envGlobal -ne '') { return $envGlobal }
 
     # 4. .secrets.json
     $secretsPath = Join-Path $ScriptDir '.secrets.json'
     if (Test-Path $secretsPath) {
         try {
             $secrets = Get-Content $secretsPath -Raw | ConvertFrom-Json
-            if ($secrets.PSObject.Properties[$BackendName]) {
-                return $secrets.$BackendName
-            }
-            if ($secrets.PSObject.Properties['default']) {
-                return $secrets.default
-            }
+            if ($secrets.PSObject.Properties[$BackendName]) { return $secrets.$BackendName }
+            if ($secrets.PSObject.Properties['default']) { return $secrets.default }
         } catch { }
     }
 
     # 5. backends.json (backward compat)
-    if ($JsonPassword) { return $JsonPassword }
+    if ($JsonPassword -and $JsonPassword -ne '') { return $JsonPassword }
 
-    # 6. Sin password
+    # 6. Sin password (BDs de desarrollo sin contraseña)
     return ''
 }
+
+$cliPasswordSet = ($Password -ne '__UNSET__')
+$cliPasswordValue = if ($cliPasswordSet) { $Password } else { '' }
 
 # =============================================================================
 # FUNCIONES UTILITARIAS
@@ -268,7 +208,11 @@ function Resolve-Password {
 
 function Get-Connection {
     param([string]$Path, [string]$Pw)
-    $connString = "Provider=Microsoft.ACE.OLEDB.12.0;Data Source=$Path;Jet OLEDB:Database Password=$Pw;"
+    if ($Pw -ne '') {
+        $connString = "Provider=Microsoft.ACE.OLEDB.12.0;Data Source=$Path;Jet OLEDB:Database Password=$Pw;"
+    } else {
+        $connString = "Provider=Microsoft.ACE.OLEDB.12.0;Data Source=$Path;"
+    }
     $conn = New-Object System.Data.OleDb.OleDbConnection($connString)
     $conn.Open()
     return $conn
@@ -280,7 +224,7 @@ function Get-BackendPath {
         if (-not (Test-Path $OverridePath)) {
             Write-Host 'ERROR: Ruta no encontrada' -ForegroundColor Red; exit 1
         }
-        $resolvedPw = Resolve-Password -BackendName '__direct__' -CliPassword $Password -JsonPassword ''
+        $resolvedPw = Resolve-Password -BackendName '__direct__' -CliPassword $cliPasswordValue -CliPasswordSet $cliPasswordSet -JsonPassword ''
         return @{ Path = $OverridePath; Password = $resolvedPw; Name = (Split-Path $OverridePath -Leaf) }
     }
     if ($Name -eq '') { $Name = $defaultBackend }
@@ -289,25 +233,29 @@ function Get-BackendPath {
     }
     $info = $backendMap[$Name]
     $jsonPw = if ($info.PSObject.Properties['password']) { $info.password } else { '' }
-    $resolvedPw = Resolve-Password -BackendName $Name -CliPassword $Password -JsonPassword $jsonPw
-    if (-not $resolvedPw) {
-        Write-Host "ERROR: No se encontro password para backend '$Name'." -ForegroundColor Red
-        Write-Host '  Opciones: -Password "pw", env ACCESS_QUERY_PW_<BACKEND>, .secrets.json, o backends.json' -ForegroundColor Yellow
-        exit 1
-    }
+    $resolvedPw = Resolve-Password -BackendName $Name -CliPassword $cliPasswordValue -CliPasswordSet $cliPasswordSet -JsonPassword $jsonPw
     return @{ Path = $info.path; Password = $resolvedPw; Name = $Name }
 }
 
 function Format-Value {
     param($val)
-    if ($val -is [System.DBNull] -or $null -eq $val) { return 'NULL' }
-    if ($val -is [string] -and $val.Length -gt 50) { return $val.Substring(0, 47) + '...' }
-    return [string]$val
+    if ($val -is [System.DBNull] -or $null -eq $val) { return $null }   # null real para JSON
+    if ($val -is [string] -and $val.Length -gt 200) { return $val.Substring(0, 197) + '...' }
+    if ($val -is [DateTime]) { return $val.ToString('yyyy-MM-dd HH:mm:ss') }
+    return $val
+}
+
+function Format-ValueDisplay {
+    param($val)
+    $v = Format-Value $val
+    if ($null -eq $v) { return 'NULL' }
+    if ($v -is [string] -and $v.Length -gt 80) { return $v.Substring(0, 77) + '...' }
+    return [string]$v
 }
 
 # =============================================================================
-# FIX #3: PARSER DE SENTENCIAS ROBUSTO
-# State machine que respeta ; dentro de strings (' y ") y comentarios --.
+# PARSER DE SENTENCIAS SQL
+# State machine que respeta ; dentro de strings (' y ") y comentarios --
 # =============================================================================
 
 function Split-SqlStatements {
@@ -320,55 +268,35 @@ function Split-SqlStatements {
     for ($i = 0; $i -lt $SqlBlock.Length; $i++) {
         $c = $SqlBlock[$i]
 
-        # -- Comilla simple: toggle, pero '' es escape en Access SQL --
         if ($c -eq "'" -and -not $inDoubleQuote) {
             if ($inSingleQuote -and ($i + 1) -lt $SqlBlock.Length -and $SqlBlock[$i + 1] -eq "'") {
-                [void]$current.Append($c)
-                $i++
-                [void]$current.Append($SqlBlock[$i])
-                continue
+                [void]$current.Append($c); $i++; [void]$current.Append($SqlBlock[$i]); continue
             }
-            $inSingleQuote = -not $inSingleQuote
-            [void]$current.Append($c)
-            continue
+            $inSingleQuote = -not $inSingleQuote; [void]$current.Append($c); continue
         }
-
-        # -- Comilla doble: toggle --
         if ($c -eq '"' -and -not $inSingleQuote) {
-            $inDoubleQuote = -not $inDoubleQuote
-            [void]$current.Append($c)
-            continue
+            $inDoubleQuote = -not $inDoubleQuote; [void]$current.Append($c); continue
         }
-
-        # -- Comentario inline -- (solo fuera de strings) --
         if ($c -eq '-' -and -not $inSingleQuote -and -not $inDoubleQuote) {
             if (($i + 1) -lt $SqlBlock.Length -and $SqlBlock[$i + 1] -eq '-') {
-                # Saltar hasta fin de linea
                 while ($i -lt $SqlBlock.Length -and $SqlBlock[$i] -ne "`n") { $i++ }
                 continue
             }
         }
-
-        # -- Separador ; solo fuera de strings --
         if ($c -eq ';' -and -not $inSingleQuote -and -not $inDoubleQuote) {
             $stmt = $current.ToString().Trim()
             if ($stmt) { [void]$statements.Add($stmt) }
-            [void]$current.Clear()
-            continue
+            [void]$current.Clear(); continue
         }
-
         [void]$current.Append($c)
     }
-
-    # Ultima sentencia sin ; final
     $lastStmt = $current.ToString().Trim()
     if ($lastStmt) { [void]$statements.Add($lastStmt) }
-
     return $statements.ToArray()
 }
 
 # =============================================================================
-# FUNCIONES DE SEGURIDAD
+# SEGURIDAD
 # =============================================================================
 
 function Get-LinkedTableNames {
@@ -376,9 +304,7 @@ function Get-LinkedTableNames {
     $linked = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     $schema = $Conn.GetSchema('Tables')
     foreach ($row in $schema) {
-        if ($row.Item('TABLE_TYPE') -eq 'LINK') {
-            [void]$linked.Add($row.Item('TABLE_NAME'))
-        }
+        if ($row.Item('TABLE_TYPE') -eq 'LINK') { [void]$linked.Add($row.Item('TABLE_NAME')) }
     }
     return $linked
 }
@@ -425,30 +351,20 @@ function Assert-WriteAllowed {
     $blocked = @()
     foreach ($tbl in $targets) {
         foreach ($deny in $DenyList) {
-            if ($tbl -like $deny) {
-                $blocked += "DENY: '$tbl' coincide con pattern '$deny'"
-            }
+            if ($tbl -like $deny) { $blocked += "DENY: '$tbl' coincide con pattern '$deny'" }
         }
-        if ($LinkedTables.Contains($tbl)) {
-            $blocked += "LINKED: '$tbl' es tabla LINKED/EXTERNA"
-        }
+        if ($LinkedTables.Contains($tbl)) { $blocked += "LINKED: '$tbl' es tabla LINKED/EXTERNA" }
         if ($AllowList.Count -gt 0) {
             $allowed = $false
-            foreach ($allow in $AllowList) {
-                if ($tbl -like $allow) { $allowed = $true; break }
-            }
-            if (-not $allowed) {
-                $blocked += "ALLOW: '$tbl' no esta en allow-list ($($AllowList -join ', '))"
-            }
+            foreach ($allow in $AllowList) { if ($tbl -like $allow) { $allowed = $true; break } }
+            if (-not $allowed) { $blocked += "ALLOW: '$tbl' no esta en allow-list ($($AllowList -join ', '))" }
         }
     }
     return @{ Targets = $targets; Blocked = $blocked }
 }
 
 # =============================================================================
-# FIX #6: VALIDACION ESTRICTA PARA SEED/TEARDOWN
-# -Seed y -Teardown REQUIEREN -AllowTable (a menos que -Force).
-# -StrictWrite extiende esto a todos los modos de escritura.
+# VALIDACION ESTRICTA SEED/TEARDOWN
 # =============================================================================
 
 $isWriteMode = $Mode -in @('Exec','Script','Seed','Teardown','DDL')
@@ -457,7 +373,7 @@ if ($isWriteMode) {
     if ($Mode -in @('Seed','Teardown') -and $allowTableList.Count -eq 0 -and -not $Force) {
         Write-Host "ERROR: -$Mode requiere -AllowTable para evitar tocar tablas equivocadas." -ForegroundColor Red
         Write-Host '  Ejemplo: -AllowTable "TbSolicitudes,TbDocumentos"' -ForegroundColor Yellow
-        Write-Host '  Usa -Force para saltarte esta restriccion (no recomendado).' -ForegroundColor DarkYellow
+        Write-Host '  Usa -Force para saltarte esta restriccion.' -ForegroundColor DarkYellow
         exit 1
     }
     if ($StrictWrite -and $allowTableList.Count -eq 0 -and -not $Force) {
@@ -468,10 +384,7 @@ if ($isWriteMode) {
 }
 
 # =============================================================================
-# FIX #4 + #5: MOTOR DE EJECUCION CON FIXTURE TRACKING + SALIDA JSON
-# - Fixture log real: .fixture-log.json acumulativo
-# - -Json emite JSON estructurado a stdout (Write-Output)
-# - Write-Host para humanos (no interfiere con JSON)
+# MOTOR DE EJECUCION CON FIXTURE TRACKING + SALIDA JSON
 # =============================================================================
 
 function Invoke-WriteStatements {
@@ -487,7 +400,6 @@ function Invoke-WriteStatements {
     $conn = Get-Connection -Path $BackendInfo.Path -Pw $BackendInfo.Password
     $linkedSet = Get-LinkedTableNames -Conn $conn
 
-    # Estructura de resultado
     $report = @{
         mode          = $Label
         backend       = $BackendInfo.Name
@@ -545,7 +457,6 @@ function Invoke-WriteStatements {
                     foreach ($b in $check.Blocked) { Write-Host "      $b" -ForegroundColor Red }
                     $dSql = if ($stmt.Length -gt 100) { $stmt.Substring(0, 97) + '...' } else { $stmt }
                     Write-Host "      SQL: $dSql" -ForegroundColor DarkGray
-                    Write-Host ''
                     Write-Host '  ABORTADO por guarda de seguridad.' -ForegroundColor Red
                 }
                 break
@@ -585,7 +496,7 @@ function Invoke-WriteStatements {
                     if ($rows -le $maxShow -and -not $OutputJson) {
                         $cols = @()
                         for ($ci = 0; $ci -lt $reader.FieldCount; $ci++) {
-                            $cols += "$($reader.GetName($ci))=$(Format-Value $reader.GetValue($ci))"
+                            $cols += "$($reader.GetName($ci))=$(Format-ValueDisplay $reader.GetValue($ci))"
                         }
                         Write-Host "      [$rows] $($cols -join ' | ')" -ForegroundColor Green
                     }
@@ -615,7 +526,6 @@ function Invoke-WriteStatements {
     $report.tablesWritten = @($allTablesWritten)
     $conn.Close()
 
-    # -- Resumen humano --
     if (-not $OutputJson) {
         Write-Host ''
         Write-Host '  -- RESUMEN --' -ForegroundColor Cyan
@@ -626,15 +536,11 @@ function Invoke-WriteStatements {
         $erC = ($report.statements | Where-Object { $_.status -eq 'ERROR' }).Count
         $drC = ($report.statements | Where-Object { $_.status -eq 'DRY-RUN' }).Count
         Write-Host "  OK: $okC | Blocked: $blC | Error: $erC | DryRun: $drC" -ForegroundColor White
-        if ($allTablesWritten.Count -gt 0) {
-            Write-Host "  Tablas: $($allTablesWritten -join ', ')" -ForegroundColor Yellow
-        }
-        if (-not $IsDryRun) {
-            Write-Host "  Filas afectadas: $($report.totalAffected)" -ForegroundColor Green
-        }
+        if ($allTablesWritten.Count -gt 0) { Write-Host "  Tablas: $($allTablesWritten -join ', ')" -ForegroundColor Yellow }
+        if (-not $IsDryRun) { Write-Host "  Filas afectadas: $($report.totalAffected)" -ForegroundColor Green }
     }
 
-    # -- Fixture log: acumular en .fixture-log.json --
+    # Fixture log
     if ($FixtureTagValue -and -not $IsDryRun -and -not $report.aborted) {
         $logPath = Join-Path $ScriptDir '.fixture-log.json'
         $logEntry = @{
@@ -655,9 +561,7 @@ function Invoke-WriteStatements {
         }
         $existingLog += $logEntry
         $existingLog | ConvertTo-Json -Depth 5 | Set-Content $logPath -Encoding UTF8
-        if (-not $OutputJson) {
-            Write-Host "  Fixture log: $logPath" -ForegroundColor DarkGray
-        }
+        if (-not $OutputJson) { Write-Host "  Fixture log: $logPath" -ForegroundColor DarkGray }
     }
 
     return $report
@@ -667,39 +571,42 @@ function Invoke-WriteStatements {
 # EJECUCION POR MODO
 # =============================================================================
 
-# -- Modos de lectura (funcionalmente identicos al original) --
-
+# ---- ListTables ----
 if ($Mode -eq 'ListTables') {
     $t = Get-BackendPath -Name $Backend -OverridePath $BackendPath
     $conn = Get-Connection -Path $t.Path -Pw $t.Password
     $all = $conn.GetSchema('Tables')
     $conn.Close()
-    Write-Host "=== TABLAS en $($t.Name) ===" -ForegroundColor Cyan
-    foreach ($row in $all) {
-        if ($row.Item('TABLE_TYPE') -eq 'TABLE') {
-            Write-Host "  $($row.Item('TABLE_NAME'))" -ForegroundColor White
-        }
+    $tableNames = @($all | Where-Object { $_.Item('TABLE_TYPE') -eq 'TABLE' } | ForEach-Object { $_.Item('TABLE_NAME') })
+    if ($Json) {
+        @{ mode = 'ListTables'; backend = $t.Name; tables = $tableNames } | ConvertTo-Json -Depth 3 | Write-Output
+    } else {
+        Write-Host "=== TABLAS en $($t.Name) ($($tableNames.Count)) ===" -ForegroundColor Cyan
+        foreach ($tn in $tableNames) { Write-Host "  $tn" -ForegroundColor White }
     }
     exit 0
 }
 
+# ---- LinkedTables ----
 if ($Mode -eq 'LinkedTables') {
     $t = Get-BackendPath -Name $Backend -OverridePath $BackendPath
     $conn = Get-Connection -Path $t.Path -Pw $t.Password
     $all = $conn.GetSchema('Tables')
-    $linked = @()
-    foreach ($row in $all) {
-        if ($row.Item('TABLE_TYPE') -eq 'LINK') {
-            $linked += [PSCustomObject]@{ Name = $row.Item('TABLE_NAME'); Origin = $row.Item('TABLE_DESCRIPTION') }
-        }
-    }
+    $linked = @($all | Where-Object { $_.Item('TABLE_TYPE') -eq 'LINK' } | ForEach-Object {
+        @{ name = $_.Item('TABLE_NAME'); origin = $_.Item('TABLE_DESCRIPTION') }
+    })
     $conn.Close()
-    Write-Host "=== TABLAS LINKED en $($t.Name) ===" -ForegroundColor Cyan
-    if ($linked.Count -eq 0) { Write-Host '  (ninguna)' -ForegroundColor Gray }
-    else { $linked | ForEach-Object { Write-Host "  $($_.Name)" -ForegroundColor Yellow; Write-Host "    -> $($_.Origin)" -ForegroundColor Gray } }
+    if ($Json) {
+        @{ mode = 'LinkedTables'; backend = $t.Name; tables = $linked } | ConvertTo-Json -Depth 3 | Write-Output
+    } else {
+        Write-Host "=== TABLAS LINKED en $($t.Name) ($($linked.Count)) ===" -ForegroundColor Cyan
+        if ($linked.Count -eq 0) { Write-Host '  (ninguna)' -ForegroundColor Gray }
+        else { $linked | ForEach-Object { Write-Host "  $($_.name)" -ForegroundColor Yellow; Write-Host "    -> $($_.origin)" -ForegroundColor Gray } }
+    }
     exit 0
 }
 
+# ---- GetSchema ----
 if ($Mode -eq 'GetSchema') {
     $t = Get-BackendPath -Name $Backend -OverridePath $BackendPath
     $conn = Get-Connection -Path $t.Path -Pw $t.Password
@@ -708,30 +615,43 @@ if ($Mode -eq 'GetSchema') {
     try { $reader = $cmd.ExecuteReader() } catch { Write-Host "ERROR: $($_.Exception.Message)" -ForegroundColor Red; $conn.Close(); exit 1 }
     $dt = $reader.GetSchemaTable()
     $reader.Close(); $conn.Close()
-    $colWidth = ($dt | ForEach-Object { $_.Item('ColumnName').Length } | Measure-Object -Maximum).Maximum
-    if ($colWidth -lt 20) { $colWidth = 20 }
-    $sep = '-' * $colWidth
-    Write-Host "=== ESQUEMA: $Table ($($t.Name)) ===" -ForegroundColor Cyan
-    Write-Host ''
-    Write-Host "  | $("Campo".PadRight($colWidth)) | Tipo           | Nullable |" -ForegroundColor White
-    Write-Host "  | $sep | -------------- | -------- |" -ForegroundColor White
+
+    $columns = @()
     foreach ($row in $dt) {
         $name     = $row.Item('ColumnName')
         $size     = $row.Item('ColumnSize')
-        $nullable = if ($row.Item('AllowDBNull')) { 'Yes' } else { 'No' }
+        $nullable = $row.Item('AllowDBNull')
         $dtype    = $row.Item('DataTypeName')
-        if     ($dtype -eq 'System.String')   { $tipo = "String($size)" }
-        elseif ($dtype -eq 'System.Boolean')  { $tipo = 'Boolean' }
-        elseif ($dtype -eq 'System.DateTime') { $tipo = 'Date' }
-        elseif ($dtype -eq 'System.Double')   { $tipo = 'Double' }
-        elseif ($dtype -eq 'System.Int64')    { $tipo = 'Long' }
-        elseif ($dtype -eq 'System.Int32')    { $tipo = 'Integer' }
-        else                                  { $tipo = $dtype }
-        Write-Host "  | $($name.PadRight($colWidth)) | $($tipo.PadRight(14)) | $nullable        |" -ForegroundColor Green
+        $tipo = switch -Wildcard ($dtype) {
+            'System.String'   { "String($size)" }
+            'System.Boolean'  { 'Boolean' }
+            'System.DateTime' { 'Date' }
+            'System.Double'   { 'Double' }
+            'System.Int64'    { 'Long' }
+            'System.Int32'    { 'Integer' }
+            'System.Decimal'  { 'Decimal' }
+            default           { $dtype }
+        }
+        $columns += @{ name = $name; type = $tipo; nullable = $nullable }
+    }
+
+    if ($Json) {
+        @{ mode = 'GetSchema'; table = $Table; backend = $t.Name; columns = $columns } | ConvertTo-Json -Depth 4 | Write-Output
+    } else {
+        $colWidth = [Math]::Max(20, ($columns | ForEach-Object { $_.name.Length } | Measure-Object -Maximum).Maximum)
+        $sep = '-' * $colWidth
+        Write-Host "=== ESQUEMA: $Table ($($t.Name)) ===" -ForegroundColor Cyan
+        Write-Host ''
+        Write-Host "  | $("Campo".PadRight($colWidth)) | Tipo           | Nullable |" -ForegroundColor White
+        Write-Host "  | $sep | -------------- | -------- |" -ForegroundColor White
+        foreach ($col in $columns) {
+            Write-Host "  | $($col.name.PadRight($colWidth)) | $($col.type.PadRight(14)) | $(if($col.nullable){'Yes'}else{'No'})        |" -ForegroundColor Green
+        }
     }
     exit 0
 }
 
+# ---- Count ----
 if ($Mode -eq 'Count') {
     $t = Get-BackendPath -Name $Backend -OverridePath $BackendPath
     $conn = Get-Connection -Path $t.Path -Pw $t.Password
@@ -739,11 +659,16 @@ if ($Mode -eq 'Count') {
     $cmd.CommandText = "SELECT COUNT(*) FROM [$Table]"
     try { $total = $cmd.ExecuteScalar() } catch { Write-Host "ERROR: $($_.Exception.Message)" -ForegroundColor Red; $conn.Close(); exit 1 }
     $conn.Close()
-    Write-Host "=== COUNT: $Table ($($t.Name)) ===" -ForegroundColor Cyan
-    Write-Host "  Total: $total" -ForegroundColor Green
+    if ($Json) {
+        @{ mode = 'Count'; table = $Table; backend = $t.Name; count = $total } | ConvertTo-Json | Write-Output
+    } else {
+        Write-Host "=== COUNT: $Table ($($t.Name)) ===" -ForegroundColor Cyan
+        Write-Host "  Total: $total" -ForegroundColor Green
+    }
     exit 0
 }
 
+# ---- Distinct ----
 if ($Mode -eq 'Distinct') {
     $t = Get-BackendPath -Name $Backend -OverridePath $BackendPath
     $conn = Get-Connection -Path $t.Path -Pw $t.Password
@@ -756,12 +681,17 @@ if ($Mode -eq 'Distinct') {
         $reader.Close()
     } catch { Write-Host "ERROR: $($_.Exception.Message)" -ForegroundColor Red; $conn.Close(); exit 1 }
     $conn.Close()
-    Write-Host "=== DISTINCT $Field ON $Table ($($t.Name)) ===" -ForegroundColor Cyan
-    Write-Host "  $($vals.Count) valores:" -ForegroundColor Gray
-    $vals | ForEach-Object { Write-Host "  - $_" -ForegroundColor Yellow }
+    if ($Json) {
+        @{ mode = 'Distinct'; table = $Table; field = $Field; backend = $t.Name; count = $vals.Count; values = $vals } | ConvertTo-Json -Depth 3 | Write-Output
+    } else {
+        Write-Host "=== DISTINCT $Field ON $Table ($($t.Name)) ===" -ForegroundColor Cyan
+        Write-Host "  $($vals.Count) valores:" -ForegroundColor Gray
+        $vals | ForEach-Object { Write-Host "  - $_" -ForegroundColor Yellow }
+    }
     exit 0
 }
 
+# ---- Compare ----
 if ($Mode -eq 'Compare') {
     $leftName  = if ($Backend)        { $Backend }        else { $defaultBackend }
     $rightName = if ($CompareBackend) { $CompareBackend } else { $defaultBackend }
@@ -772,8 +702,7 @@ if ($Mode -eq 'Compare') {
     Write-Host "Left  : $($left.Name)" -ForegroundColor Yellow
     Write-Host "Right : $($right.Name)" -ForegroundColor Yellow
     Write-Host ''
-    function Get-Ids {
-        param($path, $pw, $q)
+    function Get-Ids { param($path, $pw, $q)
         $c = Get-Connection -Path $path -Pw $pw
         $cmd = $c.CreateCommand(); $cmd.CommandText = $q
         $r = $cmd.ExecuteReader(); $ids = @()
@@ -798,40 +727,70 @@ if ($Mode -eq 'Compare') {
     exit 0
 }
 
+# ---- SQL (SELECT libre) ----
 if ($Mode -eq 'SQL') {
     $t = Get-BackendPath -Name $Backend -OverridePath $BackendPath
-    Write-Host "=== SQL ($($t.Name)) ===" -ForegroundColor Cyan
-    Write-Host $SQL -ForegroundColor Gray
-    Write-Host ''
-    $maxRows = if ($Top -gt 0) { $Top } else { 20 }
+    # -Top -1 → default 20; -Top 0 → sin límite; -Top N → N filas
+    $maxRows = if ($Top -eq 0) { [int]::MaxValue } elseif ($Top -gt 0) { $Top } else { 20 }
+    $unlimited = ($Top -eq 0)
+
     try {
         $conn = Get-Connection -Path $t.Path -Pw $t.Password
         $cmd = $conn.CreateCommand(); $cmd.CommandText = $SQL
-        $reader = $cmd.ExecuteReader(); $rows = 0
+        $reader = $cmd.ExecuteReader()
+
+        # Leer columnas
+        $colNames = @()
+        for ($i = 0; $i -lt $reader.FieldCount; $i++) { $colNames += $reader.GetName($i) }
+
+        $rows = @(); $rowCount = 0
         while ($reader.Read()) {
-            $rows++
-            if ($rows -le $maxRows) {
-                $cols = @()
+            $rowCount++
+            if ($rowCount -le $maxRows) {
+                $rowObj = @{}
                 for ($i = 0; $i -lt $reader.FieldCount; $i++) {
-                    $cols += "$($reader.GetName($i))=$(Format-Value $reader.GetValue($i))"
+                    $rowObj[$colNames[$i]] = Format-Value $reader.GetValue($i)
                 }
-                Write-Host "  [$rows] $($cols -join ' | ')" -ForegroundColor Green
+                $rows += $rowObj
             }
         }
-        if ($rows -gt $maxRows) { Write-Host "  ... y $($rows - $maxRows) filas mas (limitado a $maxRows)" -ForegroundColor Gray }
-        Write-Host ''
-        Write-Host "  Total: $rows filas" -ForegroundColor Cyan
         $reader.Close(); $conn.Close()
     } catch { Write-Host "  ERROR: $($_.Exception.Message)" -ForegroundColor Red; exit 1 }
+
+    $truncated = ($rowCount -gt $maxRows)
+
+    if ($Json) {
+        $out = @{
+            mode     = 'SQL'
+            backend  = $t.Name
+            sql      = $SQL
+            rowCount = $rowCount
+            columns  = $colNames
+            rows     = $rows
+        }
+        if ($truncated) { $out['truncated'] = $true; $out['shownRows'] = $maxRows }
+        $out | ConvertTo-Json -Depth 5 | Write-Output
+    } else {
+        Write-Host "=== SQL ($($t.Name)) ===" -ForegroundColor Cyan
+        Write-Host $SQL -ForegroundColor Gray
+        Write-Host ''
+        $r = 0
+        foreach ($row in $rows) {
+            $r++
+            $cols = $colNames | ForEach-Object { "$_=$(if($null -eq $row[$_]){'NULL'}else{[string]$row[$_]})" }
+            Write-Host "  [$r] $($cols -join ' | ')" -ForegroundColor Green
+        }
+        if ($truncated) { Write-Host "  ... y $($rowCount - $maxRows) filas mas (usa -Top 0 para todas)" -ForegroundColor Gray }
+        Write-Host ''
+        Write-Host "  Total: $rowCount filas$(if(-not $unlimited -and $Top -le 0){' (limitado a 20, usa -Top 0 para ver todas)'})" -ForegroundColor Cyan
+    }
     exit 0
 }
 
-# -- Modos de escritura (unificados) --
-
+# ---- Modos de escritura ----
 if ($Mode -in @('Exec','Script','Seed','Teardown','DDL')) {
     $t = Get-BackendPath -Name $Backend -OverridePath $BackendPath
 
-    # Resolver SQL input
     if ($SqlInput -eq '__FILE__') {
         $scriptPath = $Script
         if (-not (Test-Path $scriptPath)) {
@@ -852,13 +811,11 @@ if ($Mode -in @('Exec','Script','Seed','Teardown','DDL')) {
         Write-Host 'ERROR: No se encontraron sentencias SQL validas.' -ForegroundColor Red; exit 1
     }
 
-    # Resolver fixture tag
     $tag = ''
     if ($Mode -in @('Seed','Teardown')) {
         $tag = if ($FixtureTag) { $FixtureTag } else { 'FX_' + (Get-Date -Format 'yyyyMMdd_HHmmss') }
     }
 
-    # Resolver label
     $label = switch ($Mode) {
         'Exec'     { 'EXEC' }
         'Script'   { "SCRIPT ($([System.IO.Path]::GetFileName($Script)))" }
@@ -875,10 +832,7 @@ if ($Mode -in @('Exec','Script','Seed','Teardown','DDL')) {
         -FixtureTagValue $tag `
         -OutputJson:$Json
 
-    # FIX #5: Salida JSON estructurada a stdout
-    if ($Json) {
-        $report | ConvertTo-Json -Depth 5 | Write-Output
-    }
+    if ($Json) { $report | ConvertTo-Json -Depth 5 | Write-Output }
 
     if ($report.aborted) { exit 1 }
     exit 0
@@ -889,25 +843,24 @@ if ($Mode -in @('Exec','Script','Seed','Teardown','DDL')) {
 # =============================================================================
 
 Write-Host @"
-ACCESS-QUERY v2 -- Consultas y escritura segura a backends Access (.accdb)
+ACCESS-QUERY v3 -- Consultas y escritura segura a backends Access (.accdb)
 
 LECTURA:
-  -SQL "SELECT ..."            SELECT libre (-Top N para limitar)
-  -GetSchema -Table TbX        Esquema de campos
+  -SQL "SELECT ..."            SELECT libre (-Top 20 por defecto; -Top 0 = sin limite)
+  -GetSchema -Table TbX        Esquema de campos (tipos, nullable)
   -Count -Table TbX            Contar registros
-  -Distinct -Table Tb -Field C Valores unicos
-  -ListTables / -LinkedTables  Listar tablas
+  -Distinct -Table Tb -Field C Valores unicos de un campo
+  -ListTables                  Listar tablas locales
+  -LinkedTables                Listar tablas linked (externas)
   -Compare -CompareSQL "..." -Backend A -CompareBackend B
 
 ESCRITURA (con guardas):
   -Exec "SQL"                  SQL inline (multi-sentencia con ;)
-  -Script "ruta.sql"           Desde fichero
+  -Script "ruta.sql"           Desde fichero .sql
 
 FIXTURES (requieren -AllowTable):
-  -Seed -Exec "SQL" -AllowTable "TbX" [-FixtureTag "TAG"]
-  -Seed -Script "seed.sql" -AllowTable "TbX"
-  -Teardown -Exec "SQL" -AllowTable "TbX"
-  -Teardown -Script "clean.sql" -AllowTable "TbX"
+  -Seed   (-Exec "SQL" | -Script "seed.sql") -AllowTable "TbX" [-FixtureTag "TAG"]
+  -Teardown (-Exec "SQL" | -Script "clean.sql") -AllowTable "TbX"
 
 DDL:
   -CreateTable -Exec "CREATE TABLE ..."
@@ -915,15 +868,15 @@ DDL:
 
 SEGURIDAD:
   -DryRun            Validar sin ejecutar
-  -AllowTable "X,Y"  Solo estas tablas
-  -DenyTable "A,B"   Bloquear (suma a backends.json)
-  -StrictWrite       Requiere AllowTable en TODO modo escritura
-  -Force             Omitir AllowTable en Seed/Teardown
+  -AllowTable "X,Y"  Solo estas tablas aceptan escritura
+  -DenyTable "A,B"   Bloquear adicionales (suma a backends.json)
+  -StrictWrite       Requiere -AllowTable en TODO modo escritura
+  -Force             Omitir -AllowTable en Seed/Teardown
 
 SALIDA:
-  -Json              JSON estructurado a stdout
+  -Json              JSON estructurado a stdout (funciona en lectura Y escritura)
 
-PASSWORD (prioridad):
+PASSWORD (prioridad, las BDs sin password no necesitan configuracion):
   -Password > env ACCESS_QUERY_PW_<BACKEND> > env ACCESS_QUERY_PASSWORD > .secrets.json > backends.json
 
 BACKENDS: $($backendMap.Keys -join ', ') | Default: $defaultBackend
