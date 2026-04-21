@@ -119,21 +119,39 @@ function Resolve-AccessDocumentInfo {
             foreach ($kindCandidate in $kindCandidates) {
                 $nameVariants = @(Get-AccessDocumentNameCandidates -ModuleName $ModuleName -Kind $kindCandidate.Kind)
                 $collection = if ($kindCandidate.Kind -eq 'Form') { $project.AllForms } else { $project.AllReports }
-                foreach ($candidateName in $nameVariants) {
-                    try {
-                        $member = $collection.Item($candidateName)
-                        if ($member) {
-                            try { [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($member) | Out-Null } catch {}
-                            return [pscustomobject]@{
-                                Kind = $kindCandidate.Kind
-                                AccessObjectName = $candidateName
-                                AcObjectType = $kindCandidate.AcObjectType
-                                Folder = $kindCandidate.Folder
-                                TextExtension = $kindCandidate.TextExtension
-                                BeginMarker = $kindCandidate.BeginMarker
+                $matchedName = $null
+
+                try {
+                    foreach ($member in $collection) {
+                        try {
+                            $memberName = [string]$member.Name
+                            if ([string]::IsNullOrWhiteSpace($memberName)) { continue }
+
+                            foreach ($candidateName in $nameVariants) {
+                                if ([string]::Equals($memberName, $candidateName, [System.StringComparison]::OrdinalIgnoreCase)) {
+                                    $matchedName = $memberName
+                                    break
+                                }
+                            }
+
+                            if ($matchedName) { break }
+                        } finally {
+                            if ($member) {
+                                try { [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($member) | Out-Null } catch {}
                             }
                         }
-                    } catch {}
+                    }
+                } catch {}
+
+                if ($matchedName) {
+                    return [pscustomobject]@{
+                        Kind = $kindCandidate.Kind
+                        AccessObjectName = $matchedName
+                        AcObjectType = $kindCandidate.AcObjectType
+                        Folder = $kindCandidate.Folder
+                        TextExtension = $kindCandidate.TextExtension
+                        BeginMarker = $kindCandidate.BeginMarker
+                    }
                 }
             }
         } catch {}
