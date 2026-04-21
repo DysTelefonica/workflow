@@ -222,6 +222,8 @@ Usalo cuando querés trabajar aislado de producción o de una red compartida.
 | `fix-encoding [Mod...]` | corregir encoding | medio |
 | `generate-erd` | documentación técnica | bajo |
 | `sandbox` | sandbox local de backends | medio |
+| `list-objects` | inspección del frontend real | bajo |
+| `exists <Mod>` | verificar si un objeto/módulo existe de verdad | bajo |
 | `status` | inspeccionar sesión | bajo |
 | `end` | cierre de sesión + export final opcional | medio |
 
@@ -262,6 +264,15 @@ Usalo cuando querés trabajar aislado de producción o de una red compartida.
 ## Caso D — Querés trabajar sin tocar backends reales
 ### Usar:
 - `sandbox`
+
+## Caso E — La IA no sabe si un formulario/reporte/módulo existe realmente en la BD
+### Usar:
+- `list-objects`
+- `exists <Modulo>`
+
+### Regla operativa
+Antes de intentar crear o importar un subform/reporte dudoso, inspeccioná el frontend real.  
+No adivines si el objeto existe.
 
 ---
 
@@ -351,6 +362,43 @@ Eso permite:
 - tracking de módulos cambiados y pendientes
 
 La IA puede usar `status` para entender el estado antes de decidir acciones destructivas.
+
+## Introspección del frontend
+
+La skill ya puede inspeccionar la BD real para que la IA no trabaje a ciegas.
+
+### `list-objects`
+Lista:
+- forms
+- reports
+- modules
+- classes
+- documentModules
+
+Uso:
+
+```bash
+node cli.js list-objects --access MiBD.accdb
+node cli.js list-objects --access MiBD.accdb --json
+```
+
+### `exists <Modulo>`
+Responde si un nombre dado existe en la BD y sugiere el tipo de import.
+
+Uso:
+
+```bash
+node cli.js exists Form_subfrmDatosPCSUB_Propuesta --access MiBD.accdb
+node cli.js exists Form_subfrmDatosPCSUB_Propuesta --access MiBD.accdb --json
+```
+
+### Cuándo usarlo
+- cuando un `import-form` falla y no sabés si el objeto existe
+- cuando un `import-code` depende de un objeto base en Access
+- cuando la IA necesita distinguir entre:
+  - objeto Access existente
+  - VBComponent existente
+  - módulo/clase existente
 
 ---
 

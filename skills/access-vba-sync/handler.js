@@ -53,6 +53,69 @@ function moduleNameFromFile(filePath) {
   return path.basename(filePath, path.extname(filePath));
 }
 
+function accessDocumentNameCandidates(moduleName, kind) {
+  const prefix = kind === "Report" ? "Report_" : "Form_";
+  const out = [];
+  const push = (v) => {
+    const s = String(v || "").trim();
+    if (!s || out.includes(s)) return;
+    out.push(s);
+  };
+
+  push(moduleName);
+  push(String(moduleName || "").replace(/^(Form|Report)_/, ""));
+  if (!/^(Form|Report)_/.test(String(moduleName || ""))) {
+    push(prefix + moduleName);
+  }
+  return out;
+}
+
+function buildExistsDescriptor(catalog, moduleName) {
+  const components = Array.isArray(catalog.components) ? catalog.components : [];
+  const forms = new Set(Array.isArray(catalog.forms) ? catalog.forms : []);
+  const reports = new Set(Array.isArray(catalog.reports) ? catalog.reports : []);
+  const classes = new Set(Array.isArray(catalog.classes) ? catalog.classes : []);
+  const modules = new Set(Array.isArray(catalog.modules) ? catalog.modules : []);
+  const documentModules = new Set(Array.isArray(catalog.documentModules) ? catalog.documentModules : []);
+
+  const formCandidates = accessDocumentNameCandidates(moduleName, "Form");
+  const reportCandidates = accessDocumentNameCandidates(moduleName, "Report");
+  const accessFormName = formCandidates.find((n) => forms.has(n)) || null;
+  const accessReportName = reportCandidates.find((n) => reports.has(n)) || null;
+
+  const vbComponent = components.find((c) => String(c.name || c.Name) === String(moduleName));
+  const componentType = vbComponent ? Number(vbComponent.type ?? vbComponent.Type) : null;
+  const vbComponentExists = !!vbComponent;
+  const accessObjectKind = accessReportName ? "Report" : (accessFormName ? "Form" : null);
+  const accessObjectName = accessReportName || accessFormName || null;
+  const accessObjectExists = !!accessObjectName;
+
+  let suggestedImportMode = "import";
+  if (accessObjectExists && (documentModules.has(moduleName) || componentType === 100 || /^Form_|^Report_/.test(moduleName))) {
+    suggestedImportMode = "import-code";
+  } else if (accessObjectExists) {
+    suggestedImportMode = "import-form";
+  } else if (classes.has(moduleName) || modules.has(moduleName)) {
+    suggestedImportMode = "import";
+  } else if (/^Form_|^Report_/.test(moduleName)) {
+    suggestedImportMode = "import-form";
+  }
+
+  return {
+    moduleName,
+    accessObjectExists,
+    accessObjectKind,
+    accessObjectName,
+    accessObjectCandidates: accessObjectKind === "Report" ? reportCandidates : formCandidates,
+    vbComponentExists,
+    vbComponentType: componentType,
+    isDocumentModule: componentType === 100 || documentModules.has(moduleName),
+    moduleExists: modules.has(moduleName),
+    classExists: classes.has(moduleName),
+    suggestedImportMode
+  };
+}
+
 class AccessVbaSyncSkill {
   constructor(options = {}) {
     this.skillDir = options.skillDir || __dirname;
@@ -381,8 +444,10 @@ class AccessVbaSyncSkill {
     const mods = uniq((moduleNames || []).map(String).filter(Boolean));
     if (mods.length === 0) throw new Error("No se especificaron módulos para importar.");
 
-    // ✅ Sync CodeBehind antes de importar código (.cls)
-    if (importMode === "Code" || importMode === "Auto") {
+    // Para import Auto seguimos sincronizando sidecars locales.
+    // En import Code, VBAManager ya reconstruye el documento desde el binario
+    // y mergea solo el code-behind del .cls, evitando depender de un .form/.report.txt stale.
+    if (importMode === "Auto") {
       await this.syncCodeBehind(mods);
     }
 
@@ -733,6 +798,36 @@ class AccessVbaSyncSkill {
 
     console.log("✅ Import-all completado.");
     console.log("Abre Access → VBE → Debug → Compile");
+  }
+
+  async listObjects({ accessPath } = {}) {
+    await this.ensureReady();
+    await this.loadSessionFromDisk();
+
+    const dbPath = this.session.accessPath || (await this.detectAccessPath({ accessPath }));
+    if (!dbPath) throw new Error("No hay BD detectada para listar objetos.");
+
+    const destinationRootAbs = this.session.destinationRoot || this.resolveDestinationRoot();
+    const result = await this.runVbaManager({
+      action: "List-Objects",
+      accessPath: dbPath,
+      destinationRootAbs
+    });
+
+    const stdout = String(result.stdout || "").trim();
+    const lines = stdout.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
+    const jsonLine = [...lines].reverse().find((line) => line.startsWith("{") && line.endsWith("}"));
+    if (!jsonLine) {
+      throw new Error(`List-Objects no devolvió JSON válido.\n${stdout}`);
+    }
+
+    return JSON.parse(jsonLine);
+  }
+
+  async exists({ moduleName, accessPath } = {}) {
+    if (!moduleName) throw new Error("Falta moduleName para exists.");
+    const catalog = await this.listObjects({ accessPath });
+    return buildExistsDescriptor(catalog, moduleName);
   }
 
   async generateErd({ backendPath, erdPath } = {}) {

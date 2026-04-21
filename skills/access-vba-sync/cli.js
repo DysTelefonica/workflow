@@ -48,6 +48,50 @@ function normalizePathFlag(p) {
   return path.resolve(process.cwd(), p);
 }
 
+function printJson(value) {
+  console.log(JSON.stringify(value, null, 2));
+}
+
+function printCatalog(catalog) {
+  const sections = [
+    ["forms", "Forms"],
+    ["reports", "Reports"],
+    ["modules", "Modules"],
+    ["classes", "Classes"],
+    ["documentModules", "DocumentModules"]
+  ];
+
+  console.log(`Access: ${catalog.accessPath}`);
+  for (const [key, label] of sections) {
+    const values = Array.isArray(catalog[key]) ? catalog[key] : [];
+    console.log(`${label} (${values.length}):`);
+    if (values.length === 0) {
+      console.log("  -");
+      continue;
+    }
+    for (const item of values) console.log(`  - ${item}`);
+  }
+}
+
+function printExistsResult(result) {
+  console.log(`Módulo consultado: ${result.moduleName}`);
+  console.log(`Objeto Access: ${result.accessObjectExists ? "sí" : "no"}`);
+  if (result.accessObjectExists) {
+    console.log(`  Tipo: ${result.accessObjectKind}`);
+    console.log(`  Nombre: ${result.accessObjectName}`);
+  } else if (Array.isArray(result.accessObjectCandidates) && result.accessObjectCandidates.length > 0) {
+    console.log(`  Candidatos probados: ${result.accessObjectCandidates.join(", ")}`);
+  }
+  console.log(`VBComponent: ${result.vbComponentExists ? "sí" : "no"}`);
+  if (result.vbComponentExists) {
+    console.log(`  Tipo VBComponent: ${result.vbComponentType}`);
+  }
+  console.log(`Módulo estándar existe: ${result.moduleExists ? "sí" : "no"}`);
+  console.log(`Clase existe: ${result.classExists ? "sí" : "no"}`);
+  console.log(`Document module: ${result.isDocumentModule ? "sí" : "no"}`);
+  console.log(`Import recomendado: ${result.suggestedImportMode}`);
+}
+
 function printHelp() {
   console.log(
     [
@@ -64,6 +108,8 @@ function printHelp() {
       "  node cli.js fix-encoding   [--access <ruta>] [--destination_root <dir>] [--password <pwd>] [--location Both|Src|Access] [<Mod...>]",
       "  node cli.js generate-erd   [--backend <ruta>] [--erd_path <dir>] [--password <pwd>]",
       "  node cli.js sandbox        [--access <ruta>] [--password <pwd>] [--backend_password <pwd>] [--keep_sidecars]",
+      "  node cli.js list-objects   [--access <ruta>] [--password <pwd>] [--json]",
+      "  node cli.js exists <Mod>   [--access <ruta>] [--password <pwd>] [--json]",
       "  node cli.js status",
       "  node cli.js end            [--auto_export_on_end false]",
       "",
@@ -85,6 +131,8 @@ function printHelp() {
       "  generate-erd     Genera documentación de estructura de tablas en Markdown",
       "  sandbox          Copia backends vinculados al lado del frontend y revincula las tablas",
       "                   creando un sandbox aislado de producción",
+      "  list-objects     Lista formularios, reportes, módulos, clases y document modules del frontend",
+      "  exists <Mod>     Dice si un formulario/reporte/módulo/clase existe realmente en la BD y sugiere import",
       "  status           Muestra el estado de la sesión activa",
       "  end              Cierra la sesión y restaura la configuración de Access",
       "",
@@ -100,7 +148,8 @@ function printHelp() {
       "  --backend <ruta>             Para generate-erd: ruta al backend _Datos.accdb",
       "  --erd_path <dir>             Para generate-erd: carpeta de salida (default: docs/ERD)",
       "  --backend_password <pwd>     Para sandbox: contraseña de los backends (default: misma que --password)",
-      "  --keep_sidecars              Para sandbox: flag actualmente informativo; los sidecars se mantienen igual"
+      "  --keep_sidecars              Para sandbox: flag actualmente informativo; los sidecars se mantienen igual",
+      "  --json                       Para list-objects / exists: salida JSON para automatización"
     ].join("\n")
   );
 }
@@ -208,6 +257,25 @@ async function main() {
     const backendPassword = flags.backend_password || null;
     const keepSidecars = toBoolFlag(flags.keep_sidecars, false);
     await skill.sandbox({ accessPath, backendPassword, keepSidecars });
+    return;
+  }
+
+  if (command === "list-objects") {
+    const catalog = await skill.listObjects({ accessPath });
+    if (toBoolFlag(flags.json, false)) printJson(catalog);
+    else printCatalog(catalog);
+    return;
+  }
+
+  if (command === "exists") {
+    if (mods.length !== 1) {
+      console.error("Uso: node cli.js exists <Modulo> [--access <ruta>] [--password <pwd>] [--json]");
+      process.exitCode = 1;
+      return;
+    }
+    const result = await skill.exists({ moduleName: mods[0], accessPath });
+    if (toBoolFlag(flags.json, false)) printJson(result);
+    else printExistsResult(result);
     return;
   }
 
