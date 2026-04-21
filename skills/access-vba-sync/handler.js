@@ -21,24 +21,34 @@ function powershellExe() {
   return process.env.POWERSHELL_EXE || "powershell.exe";
 }
 
+function sortInsensitive(values) {
+  return [...(values || [])].sort((a, b) => String(a).localeCompare(String(b), "es", { sensitivity: "base" }));
+}
+
 function isAccessDbFileName(name) {
   const ext = path.extname(name).toLowerCase();
   return ext === ".accdb" || ext === ".accde" || ext === ".mdb" || ext === ".mde";
 }
 
-// FIX: incluir .form.txt ademas de .bas, .cls, .frm
+function isDocumentTextFileName(name) {
+  const lower = String(name || "").toLowerCase();
+  return lower.endsWith(".form.txt") || lower.endsWith(".report.txt");
+}
+
 function isWatchedExt(filePath) {
   const name = path.basename(filePath).toLowerCase();
-  if (name.endsWith(".form.txt")) return true;
+  if (isDocumentTextFileName(name)) return true;
   const ext = path.extname(filePath).toLowerCase();
   return ext === ".bas" || ext === ".cls" || ext === ".frm";
 }
 
-// FIX: extraer nombre de modulo correctamente para .form.txt
 function moduleNameFromFile(filePath) {
   const base = path.basename(filePath);
   if (base.toLowerCase().endsWith(".form.txt")) {
     return base.slice(0, -".form.txt".length);
+  }
+  if (base.toLowerCase().endsWith(".report.txt")) {
+    return base.slice(0, -".report.txt".length);
   }
   return path.basename(filePath, path.extname(filePath));
 }
@@ -53,6 +63,7 @@ class AccessVbaSyncSkill {
     this.password = options.password || null;
 
     this.vbaManagerPath = path.join(this.skillDir, "VBAManager.ps1");
+    this.syncFormCodePath = path.join(this.skillDir, "Sync-FormCode.ps1");
     this.stateDir = path.join(this.projectRoot, ".access-vba-skill");
     this.stateFile = path.join(this.stateDir, "session.json");
 
@@ -78,6 +89,7 @@ class AccessVbaSyncSkill {
   async ensureReady() {
     await fsp.mkdir(this.stateDir, { recursive: true });
     await fsp.access(this.vbaManagerPath, fs.constants.F_OK);
+    await fsp.access(this.syncFormCodePath, fs.constants.F_OK);
   }
 
   async loadSessionFromDisk() {
@@ -139,6 +151,13 @@ class AccessVbaSyncSkill {
 
   modulesPathFor(accessPath, destinationRootAbs) {
     return destinationRootAbs;
+  }
+
+  printExportOverwriteWarning(actionLabel) {
+    console.log("⚠️  CUIDADO:");
+    console.log(`   ${actionLabel} exporta DESDE el binario Access HACIA disco.`);
+    console.log("   Si ya hay cambios locales en src/ sin importar, podés sobrescribirlos con código viejo del binario.");
+    console.log("   Si la IA acaba de editar archivos, normalmente corresponde IMPORT, no EXPORT.\n");
   }
 
   runVbaManager({ action, accessPath, destinationRootAbs, moduleNames = [], backendPath, erdPath, location, importMode, backendPassword, keepSidecars }) {
@@ -253,6 +272,7 @@ class AccessVbaSyncSkill {
 
     await this.saveSessionToDisk();
 
+    this.printExportOverwriteWarning("start");
     console.log("🚀 Export inicial (todos los módulos)...");
     await this.runVbaManager({
       action: "Export",
@@ -266,41 +286,83 @@ class AccessVbaSyncSkill {
   }
 
   async syncCodeBehind(moduleNames) {
-    const fs = require("fs");
-    const path = require("path");
-    const formsRoot = path.join(this.projectRoot, this.destinationRoot, "forms");
-    
     const mods = uniq((moduleNames || []).map(String).filter(Boolean));
     let synced = 0;
-    
+
     for (const mod of mods) {
-      const clsPath = path.join(formsRoot, mod + ".cls");
-      const formPath = path.join(formsRoot, mod + ".form.txt");
-      
-      if (!fs.existsSync(clsPath) || !fs.existsSync(formPath)) continue;
-      
-      let formContent;
       try {
-        formContent = fs.readFileSync(formPath, "utf8");
-      } catch { continue; }
-      
-      const cbIndex = formContent.indexOf("CodeBehind");
-      if (cbIndex === -1) continue;
-      
-      let clsContent;
-      try {
-        clsContent = fs.readFileSync(clsPath, "utf8");
-      } catch { continue; }
-      
-      const uiPart = formContent.substring(0, cbIndex);
-      const newFormContent = uiPart + "CodeBehind\r\n" + clsContent;
-      
-      fs.writeFileSync(formPath, newFormContent, "utf8");
-      console.log(`  🔄 Sincronizado CodeBehind: ${mod}.form.txt`);
-      synced++;
+        const result = await this.runSyncFormCode(mod);
+        if (result.stdout) process.stdout.write(result.stdout);
+        if (result.stderr) process.stderr.write(result.stderr);
+        synced++;
+      } catch (err) {
+        const text = `${err.stderr || ""}\n${err.stdout || ""}`.toLowerCase();
+        if (!text.includes("no se encontraron archivos sincronizables")) {
+          throw err;
+        }
+      }
     }
-    
+
     return synced;
+  }
+
+  runSyncFormCode(moduleName) {
+    return new Promise((resolve, reject) => {
+      const exe = powershellExe();
+      const args = [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        this.syncFormCodePath,
+        "-ModuleName",
+        moduleName,
+        "-ProjectRoot",
+        this.projectRoot,
+        "-DestinationRoot",
+        this.destinationRoot
+      ];
+
+      const child = spawn(exe, args, {
+        cwd: this.projectRoot,
+        windowsHide: true
+      });
+
+      let stdout = "";
+      let stderr = "";
+      child.stdout.on("data", (d) => {
+        stdout += d.toString();
+      });
+      child.stderr.on("data", (d) => {
+        stderr += d.toString();
+      });
+
+      child.on("error", reject);
+      child.on("close", (code) => {
+        if (code === 0) return resolve({ code, stdout, stderr });
+        const err = new Error(`Sync-FormCode.ps1 terminó con código ${code}`);
+        err.code = code;
+        err.stdout = stdout;
+        err.stderr = stderr;
+        return reject(err);
+      });
+    });
+  }
+
+  async collectAllDocumentModules() {
+    const modules = new Set();
+    for (const folder of ["forms", "reports"]) {
+      const root = path.join(this.projectRoot, this.destinationRoot, folder);
+      try {
+        const entries = await fsp.readdir(root, { withFileTypes: true });
+        for (const entry of entries) {
+          if (!entry.isFile()) continue;
+          if (!entry.name.toLowerCase().endsWith(".cls")) continue;
+          modules.add(entry.name.slice(0, -".cls".length));
+        }
+      } catch {}
+    }
+    return sortInsensitive([...modules]);
   }
 
   async importModules({ moduleNames, accessPath, importMode = "Auto" } = {}) {
@@ -612,6 +674,7 @@ class AccessVbaSyncSkill {
     const mods = uniq((moduleNames || []).map(String).filter(Boolean));
     if (mods.length === 0) throw new Error("No se especificaron módulos para exportar.");
 
+    this.printExportOverwriteWarning("export");
     console.log(`📤 Exportando ${mods.length} módulo(s): ${mods.join(", ")}`);
 
     await this.runVbaManager({
@@ -633,6 +696,7 @@ class AccessVbaSyncSkill {
 
     const destinationRootAbs = this.session.destinationRoot || this.resolveDestinationRoot();
 
+    this.printExportOverwriteWarning("export-all");
     console.log("📤 Exportando todos los módulos...");
     await this.runVbaManager({
       action: "Export",
@@ -654,6 +718,11 @@ class AccessVbaSyncSkill {
     const destinationRootAbs = this.session.destinationRoot || this.resolveDestinationRoot();
     const dbPath = this.session.accessPath || (await this.detectAccessPath({ accessPath }));
     if (!dbPath) throw new Error("No hay BD detectada para importar.");
+
+    const allDocumentModules = await this.collectAllDocumentModules();
+    if (allDocumentModules.length > 0) {
+      await this.syncCodeBehind(allDocumentModules);
+    }
 
     console.log("📥 Importando todos los módulos desde src/...");
     await this.runVbaManager({
@@ -693,6 +762,9 @@ class AccessVbaSyncSkill {
     const destinationRootAbs = this.session.destinationRoot || this.resolveDestinationRoot();
 
     console.log("🔒 Creando sandbox (revinculando a backends locales)...");
+    if (keepSidecars) {
+      console.log("ℹ️  --keep_sidecars hoy no cambia el resultado final: los sidecars se mantienen igualmente.");
+    }
     await this.runVbaManager({
       action: "Sandbox",
       accessPath: detectedAccess,
@@ -722,6 +794,9 @@ class AccessVbaSyncSkill {
     console.log(`   Último sync: ${this.session.lastSyncAt || "—"}`);
     console.log(`   Pendientes: ${uniq(this.session.pendingModules || []).length}`);
     console.log(`   Módulos tocados: ${changed.length}`);
+    if (changed.length > 0) {
+      console.log(`   Últimos módulos tocados: ${changed.join(", ")}`);
+    }
   }
 }
 

@@ -69,12 +69,15 @@ function printHelp() {
       "",
       "Comandos:",
       "  start            Export inicial de todos los módulos + inicia sesión",
+      "                   PELIGROSO si ya hay cambios locales nuevos no importados",
       "  watch            Inicia sesión (si no hay) + auto-sync al guardar archivos",
       "  export  <Mod..>  Exporta módulos específicos de la BD hacia src/",
+      "                   PELIGROSO si ya hay cambios locales nuevos no importados",
       "  export-all       Exporta todos los módulos de la BD hacia src/",
+      "                   PELIGROSO si ya hay cambios locales nuevos no importados",
       "  import  <Mod..>  Importa módulos específicos de src/ hacia la BD",
-      "  import-form <Mod..> Importa formularios desde *.form.txt (UI + código)",
-      "  import-code <Mod..> Importa code-behind desde *.cls/*.bas (sin layout)",
+      "  import-form <Mod..> Importa documentos UI desde *.form.txt/*.report.txt",
+      "  import-code <Mod..> Importa código; sincroniza CodeBehind antes cuando aplica",
       "  import-all       Importa todos los módulos de src/ hacia la BD",
       "  sync    <Mod..>  Alias de import",
       "  fix-encoding     Corrige encoding (ANSI→UTF-8 sin BOM) en src/, en la BD, o en ambos",
@@ -97,7 +100,7 @@ function printHelp() {
       "  --backend <ruta>             Para generate-erd: ruta al backend _Datos.accdb",
       "  --erd_path <dir>             Para generate-erd: carpeta de salida (default: docs/ERD)",
       "  --backend_password <pwd>     Para sandbox: contraseña de los backends (default: misma que --password)",
-      "  --keep_sidecars              Para sandbox: no borrar los backends copiados al terminar"
+      "  --keep_sidecars              Para sandbox: flag actualmente informativo; los sidecars se mantienen igual"
     ].join("\n")
   );
 }
