@@ -1,5 +1,16 @@
-node_modules/
+# OS
 .DS_Store
+Thumbs.db
+
+# Logs
 *.log
 
+# Env
 .env
+
+# Access lock files
+*.laccdb
+
+# Local sandbox (backends copy destination)
+# Uncomment if you want to ignore the local copy
+# C:/00repos/datos/

@@ -21,116 +21,26 @@ function powershellExe() {
   return process.env.POWERSHELL_EXE || "powershell.exe";
 }
 
-function sortInsensitive(values) {
-  return [...(values || [])].sort((a, b) => String(a).localeCompare(String(b), "es", { sensitivity: "base" }));
-}
-
 function isAccessDbFileName(name) {
   const ext = path.extname(name).toLowerCase();
   return ext === ".accdb" || ext === ".accde" || ext === ".mdb" || ext === ".mde";
 }
 
-function isDocumentTextFileName(name) {
-  const lower = String(name || "").toLowerCase();
-  return lower.endsWith(".form.txt") || lower.endsWith(".report.txt");
-}
-
+// FIX: incluir .form.txt ademas de .bas, .cls, .frm
 function isWatchedExt(filePath) {
   const name = path.basename(filePath).toLowerCase();
-  if (isDocumentTextFileName(name)) return true;
+  if (name.endsWith(".form.txt")) return true;
   const ext = path.extname(filePath).toLowerCase();
   return ext === ".bas" || ext === ".cls" || ext === ".frm";
 }
 
+// FIX: extraer nombre de modulo correctamente para .form.txt
 function moduleNameFromFile(filePath) {
   const base = path.basename(filePath);
   if (base.toLowerCase().endsWith(".form.txt")) {
     return base.slice(0, -".form.txt".length);
   }
-  if (base.toLowerCase().endsWith(".report.txt")) {
-    return base.slice(0, -".report.txt".length);
-  }
   return path.basename(filePath, path.extname(filePath));
-}
-
-function accessDocumentNameCandidates(moduleName, kind) {
-  const prefix = kind === "Report" ? "Report_" : "Form_";
-  const out = [];
-  const push = (v) => {
-    const s = String(v || "").trim();
-    if (!s || out.includes(s)) return;
-    out.push(s);
-  };
-
-  push(moduleName);
-  push(String(moduleName || "").replace(/^(Form|Report)_/, ""));
-  if (!/^(Form|Report)_/.test(String(moduleName || ""))) {
-    push(prefix + moduleName);
-  }
-  return out;
-}
-
-function moduleNameVariants(moduleName) {
-  const out = [];
-  const push = (v) => {
-    const s = String(v || "").trim();
-    if (!s || out.includes(s)) return;
-    out.push(s);
-  };
-
-  push(moduleName);
-  push(String(moduleName || "").replace(/^(Form|Report)_/, ""));
-  if (!/^(Form|Report)_/.test(String(moduleName || ""))) {
-    push(`Form_${moduleName}`);
-    push(`Report_${moduleName}`);
-  }
-  return out;
-}
-
-function buildExistsDescriptor(catalog, moduleName) {
-  const components = Array.isArray(catalog.components) ? catalog.components : [];
-  const forms = new Set(Array.isArray(catalog.forms) ? catalog.forms : []);
-  const reports = new Set(Array.isArray(catalog.reports) ? catalog.reports : []);
-  const classes = new Set(Array.isArray(catalog.classes) ? catalog.classes : []);
-  const modules = new Set(Array.isArray(catalog.modules) ? catalog.modules : []);
-  const documentModules = new Set(Array.isArray(catalog.documentModules) ? catalog.documentModules : []);
-
-  const formCandidates = accessDocumentNameCandidates(moduleName, "Form");
-  const reportCandidates = accessDocumentNameCandidates(moduleName, "Report");
-  const accessFormName = formCandidates.find((n) => forms.has(n)) || null;
-  const accessReportName = reportCandidates.find((n) => reports.has(n)) || null;
-
-  const vbComponent = components.find((c) => String(c.name || c.Name) === String(moduleName));
-  const componentType = vbComponent ? Number(vbComponent.type ?? vbComponent.Type) : null;
-  const vbComponentExists = !!vbComponent;
-  const accessObjectKind = accessReportName ? "Report" : (accessFormName ? "Form" : null);
-  const accessObjectName = accessReportName || accessFormName || null;
-  const accessObjectExists = !!accessObjectName;
-
-  let suggestedImportMode = "import";
-  if (accessObjectExists && (documentModules.has(moduleName) || componentType === 100 || /^Form_|^Report_/.test(moduleName))) {
-    suggestedImportMode = "import-code";
-  } else if (accessObjectExists) {
-    suggestedImportMode = "import-form";
-  } else if (classes.has(moduleName) || modules.has(moduleName)) {
-    suggestedImportMode = "import";
-  } else if (/^Form_|^Report_/.test(moduleName)) {
-    suggestedImportMode = "import-form";
-  }
-
-  return {
-    moduleName,
-    accessObjectExists,
-    accessObjectKind,
-    accessObjectName,
-    accessObjectCandidates: accessObjectKind === "Report" ? reportCandidates : formCandidates,
-    vbComponentExists,
-    vbComponentType: componentType,
-    isDocumentModule: componentType === 100 || documentModules.has(moduleName),
-    moduleExists: modules.has(moduleName),
-    classExists: classes.has(moduleName),
-    suggestedImportMode
-  };
 }
 
 class AccessVbaSyncSkill {
@@ -143,7 +53,6 @@ class AccessVbaSyncSkill {
     this.password = options.password || null;
 
     this.vbaManagerPath = path.join(this.skillDir, "VBAManager.ps1");
-    this.syncFormCodePath = path.join(this.skillDir, "Sync-FormCode.ps1");
     this.stateDir = path.join(this.projectRoot, ".access-vba-skill");
     this.stateFile = path.join(this.stateDir, "session.json");
 
@@ -169,7 +78,6 @@ class AccessVbaSyncSkill {
   async ensureReady() {
     await fsp.mkdir(this.stateDir, { recursive: true });
     await fsp.access(this.vbaManagerPath, fs.constants.F_OK);
-    await fsp.access(this.syncFormCodePath, fs.constants.F_OK);
   }
 
   async loadSessionFromDisk() {
@@ -233,86 +141,7 @@ class AccessVbaSyncSkill {
     return destinationRootAbs;
   }
 
-  async pathExists(filePath) {
-    try {
-      await fsp.access(filePath, fs.constants.F_OK);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  async getImportCodeHints(moduleName, destinationRootAbs) {
-    const variants = moduleNameVariants(moduleName);
-    const hints = {
-      formCls: false,
-      reportCls: false,
-      formText: false,
-      reportText: false,
-      classCls: false,
-      moduleBas: false
-    };
-
-    for (const variant of variants) {
-      if (!hints.formCls && await this.pathExists(path.join(destinationRootAbs, "forms", `${variant}.cls`))) hints.formCls = true;
-      if (!hints.reportCls && await this.pathExists(path.join(destinationRootAbs, "reports", `${variant}.cls`))) hints.reportCls = true;
-      if (!hints.formText && await this.pathExists(path.join(destinationRootAbs, "forms", `${variant}.form.txt`))) hints.formText = true;
-      if (!hints.reportText && await this.pathExists(path.join(destinationRootAbs, "reports", `${variant}.report.txt`))) hints.reportText = true;
-      if (!hints.classCls && await this.pathExists(path.join(destinationRootAbs, "classes", `${variant}.cls`))) hints.classCls = true;
-      if (!hints.moduleBas && await this.pathExists(path.join(destinationRootAbs, "modules", `${variant}.bas`))) hints.moduleBas = true;
-    }
-
-    return hints;
-  }
-
-  async assertImportCodeTargetsAreDocumentModules(moduleNames, destinationRootAbs) {
-    const invalid = [];
-    const hintsByModule = new Map();
-
-    for (const mod of moduleNames) {
-      const hints = await this.getImportCodeHints(mod, destinationRootAbs);
-      hintsByModule.set(mod, hints);
-
-      const looksDocument =
-        /^Form_|^Report_/.test(mod) ||
-        hints.formCls ||
-        hints.reportCls ||
-        hints.formText ||
-        hints.reportText;
-
-      const looksStandard = hints.classCls || hints.moduleBas;
-
-      if (!looksDocument && looksStandard) {
-        invalid.push(mod);
-      }
-    }
-
-    if (invalid.length === 0) return;
-
-    const details = invalid.map((mod) => {
-      const hints = hintsByModule.get(mod) || {};
-      const found = [];
-      if (hints.classCls) found.push("classes/*.cls");
-      if (hints.moduleBas) found.push("modules/*.bas");
-      return `${mod}${found.length ? ` (${found.join(", ")})` : ""}`;
-    });
-
-    throw new Error(
-      `import-code solo sirve para code-behind de formularios/reportes. ` +
-      `Estos módulos parecen clases/módulos normales: ${details.join(", ")}. ` +
-      `Usá 'import' para ellos. Si mezclaste tipos, separá la lista: ` +
-      `'import-code <Form_/Report_...>' y 'import <clases/módulos>'.`
-    );
-  }
-
-  printExportOverwriteWarning(actionLabel) {
-    console.log("⚠️  CUIDADO:");
-    console.log(`   ${actionLabel} exporta DESDE el binario Access HACIA disco.`);
-    console.log("   Si ya hay cambios locales en src/ sin importar, podés sobrescribirlos con código viejo del binario.");
-    console.log("   Si la IA acaba de editar archivos, normalmente corresponde IMPORT, no EXPORT.\n");
-  }
-
-  runVbaManager({ action, accessPath, destinationRootAbs, moduleNames = [], backendPath, erdPath, location, importMode, backendPassword, keepSidecars }) {
+  runVbaManager({ action, accessPath, destinationRootAbs, moduleNames = [], backendPath, erdPath, location, importMode }) {
     return new Promise((resolve, reject) => {
       const exe = powershellExe();
       const args = [
@@ -349,13 +178,6 @@ class AccessVbaSyncSkill {
       // Esto evita toda ambiguedad posicional con otros parametros como -Location.
       if (Array.isArray(moduleNames) && moduleNames.length > 0) {
         args.push("-ModuleName", moduleNames.join(","));
-      }
-
-      if (backendPassword) {
-        args.push("-BackendPassword", backendPassword);
-      }
-      if (keepSidecars) {
-        args.push("-KeepSidecars");
       }
 
       if (this.password) {
@@ -424,7 +246,6 @@ class AccessVbaSyncSkill {
 
     await this.saveSessionToDisk();
 
-    this.printExportOverwriteWarning("start");
     console.log("🚀 Export inicial (todos los módulos)...");
     await this.runVbaManager({
       action: "Export",
@@ -438,83 +259,41 @@ class AccessVbaSyncSkill {
   }
 
   async syncCodeBehind(moduleNames) {
+    const fs = require("fs");
+    const path = require("path");
+    const formsRoot = path.join(this.projectRoot, this.destinationRoot, "forms");
+    
     const mods = uniq((moduleNames || []).map(String).filter(Boolean));
     let synced = 0;
-
+    
     for (const mod of mods) {
+      const clsPath = path.join(formsRoot, mod + ".cls");
+      const formPath = path.join(formsRoot, mod + ".form.txt");
+      
+      if (!fs.existsSync(clsPath) || !fs.existsSync(formPath)) continue;
+      
+      let formContent;
       try {
-        const result = await this.runSyncFormCode(mod);
-        if (result.stdout) process.stdout.write(result.stdout);
-        if (result.stderr) process.stderr.write(result.stderr);
-        synced++;
-      } catch (err) {
-        const text = `${err.stderr || ""}\n${err.stdout || ""}`.toLowerCase();
-        if (!text.includes("no se encontraron archivos sincronizables")) {
-          throw err;
-        }
-      }
+        formContent = fs.readFileSync(formPath, "utf8");
+      } catch { continue; }
+      
+      const cbIndex = formContent.indexOf("CodeBehind");
+      if (cbIndex === -1) continue;
+      
+      let clsContent;
+      try {
+        clsContent = fs.readFileSync(clsPath, "utf8");
+      } catch { continue; }
+      
+      const uiPart = formContent.substring(0, cbIndex);
+      const newFormContent = uiPart + "CodeBehind\r\n" + clsContent;
+      
+      fs.writeFileSync(formPath, newFormContent, "utf8");
+      console.log(`  🔄 Sincronizado CodeBehind: ${mod}.form.txt`);
+      synced++;
     }
-
+    
     return synced;
-  }
-
-  runSyncFormCode(moduleName) {
-    return new Promise((resolve, reject) => {
-      const exe = powershellExe();
-      const args = [
-        "-NoProfile",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-File",
-        this.syncFormCodePath,
-        "-ModuleName",
-        moduleName,
-        "-ProjectRoot",
-        this.projectRoot,
-        "-DestinationRoot",
-        this.destinationRoot
-      ];
-
-      const child = spawn(exe, args, {
-        cwd: this.projectRoot,
-        windowsHide: true
-      });
-
-      let stdout = "";
-      let stderr = "";
-      child.stdout.on("data", (d) => {
-        stdout += d.toString();
-      });
-      child.stderr.on("data", (d) => {
-        stderr += d.toString();
-      });
-
-      child.on("error", reject);
-      child.on("close", (code) => {
-        if (code === 0) return resolve({ code, stdout, stderr });
-        const err = new Error(`Sync-FormCode.ps1 terminó con código ${code}`);
-        err.code = code;
-        err.stdout = stdout;
-        err.stderr = stderr;
-        return reject(err);
-      });
-    });
-  }
-
-  async collectAllDocumentModules() {
-    const modules = new Set();
-    for (const folder of ["forms", "reports"]) {
-      const root = path.join(this.projectRoot, this.destinationRoot, folder);
-      try {
-        const entries = await fsp.readdir(root, { withFileTypes: true });
-        for (const entry of entries) {
-          if (!entry.isFile()) continue;
-          if (!entry.name.toLowerCase().endsWith(".cls")) continue;
-          modules.add(entry.name.slice(0, -".cls".length));
-        }
-      } catch {}
-    }
-    return sortInsensitive([...modules]);
   }
 
   async importModules({ moduleNames, accessPath, importMode = "Auto" } = {}) {
@@ -533,14 +312,8 @@ class AccessVbaSyncSkill {
     const mods = uniq((moduleNames || []).map(String).filter(Boolean));
     if (mods.length === 0) throw new Error("No se especificaron módulos para importar.");
 
-    if (importMode === "Code") {
-      await this.assertImportCodeTargetsAreDocumentModules(mods, destinationRootAbs);
-    }
-
-    // Para import Auto seguimos sincronizando sidecars locales.
-    // En import Code, VBAManager ya reconstruye el documento desde el binario
-    // y mergea solo el code-behind del .cls, evitando depender de un .form/.report.txt stale.
-    if (importMode === "Auto") {
+    // ✅ Sync CodeBehind antes de importar código (.cls)
+    if (importMode === "Code" || importMode === "Auto") {
       await this.syncCodeBehind(mods);
     }
 
@@ -832,7 +605,6 @@ class AccessVbaSyncSkill {
     const mods = uniq((moduleNames || []).map(String).filter(Boolean));
     if (mods.length === 0) throw new Error("No se especificaron módulos para exportar.");
 
-    this.printExportOverwriteWarning("export");
     console.log(`📤 Exportando ${mods.length} módulo(s): ${mods.join(", ")}`);
 
     await this.runVbaManager({
@@ -854,7 +626,6 @@ class AccessVbaSyncSkill {
 
     const destinationRootAbs = this.session.destinationRoot || this.resolveDestinationRoot();
 
-    this.printExportOverwriteWarning("export-all");
     console.log("📤 Exportando todos los módulos...");
     await this.runVbaManager({
       action: "Export",
@@ -877,11 +648,6 @@ class AccessVbaSyncSkill {
     const dbPath = this.session.accessPath || (await this.detectAccessPath({ accessPath }));
     if (!dbPath) throw new Error("No hay BD detectada para importar.");
 
-    const allDocumentModules = await this.collectAllDocumentModules();
-    if (allDocumentModules.length > 0) {
-      await this.syncCodeBehind(allDocumentModules);
-    }
-
     console.log("📥 Importando todos los módulos desde src/...");
     await this.runVbaManager({
       action: "Import",
@@ -891,36 +657,6 @@ class AccessVbaSyncSkill {
 
     console.log("✅ Import-all completado.");
     console.log("Abre Access → VBE → Debug → Compile");
-  }
-
-  async listObjects({ accessPath } = {}) {
-    await this.ensureReady();
-    await this.loadSessionFromDisk();
-
-    const dbPath = this.session.accessPath || (await this.detectAccessPath({ accessPath }));
-    if (!dbPath) throw new Error("No hay BD detectada para listar objetos.");
-
-    const destinationRootAbs = this.session.destinationRoot || this.resolveDestinationRoot();
-    const result = await this.runVbaManager({
-      action: "List-Objects",
-      accessPath: dbPath,
-      destinationRootAbs
-    });
-
-    const stdout = String(result.stdout || "").trim();
-    const lines = stdout.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
-    const jsonLine = [...lines].reverse().find((line) => line.startsWith("{") && line.endsWith("}"));
-    if (!jsonLine) {
-      throw new Error(`List-Objects no devolvió JSON válido.\n${stdout}`);
-    }
-
-    return JSON.parse(jsonLine);
-  }
-
-  async exists({ moduleName, accessPath } = {}) {
-    if (!moduleName) throw new Error("Falta moduleName para exists.");
-    const catalog = await this.listObjects({ accessPath });
-    return buildExistsDescriptor(catalog, moduleName);
   }
 
   async generateErd({ backendPath, erdPath } = {}) {
@@ -938,29 +674,6 @@ class AccessVbaSyncSkill {
       erdPath
     });
     console.log("✅ ERD Generado.");
-  }
-
-  async sandbox({ accessPath, backendPassword, keepSidecars } = {}) {
-    await this.ensureReady();
-    await this.loadSessionFromDisk();
-
-    const detectedAccess = await this.detectAccessPath({ accessPath });
-    if (!detectedAccess) throw new Error("No hay BD detectada para sandbox.");
-
-    const destinationRootAbs = this.session.destinationRoot || this.resolveDestinationRoot();
-
-    console.log("🔒 Creando sandbox (revinculando a backends locales)...");
-    if (keepSidecars) {
-      console.log("ℹ️  --keep_sidecars hoy no cambia el resultado final: los sidecars se mantienen igualmente.");
-    }
-    await this.runVbaManager({
-      action: "Sandbox",
-      accessPath: detectedAccess,
-      destinationRootAbs,
-      backendPassword: backendPassword || null,
-      keepSidecars: !!keepSidecars
-    });
-    console.log("✅ Sandbox listo.");
   }
 
   async status() {
@@ -982,9 +695,6 @@ class AccessVbaSyncSkill {
     console.log(`   Último sync: ${this.session.lastSyncAt || "—"}`);
     console.log(`   Pendientes: ${uniq(this.session.pendingModules || []).length}`);
     console.log(`   Módulos tocados: ${changed.length}`);
-    if (changed.length > 0) {
-      console.log(`   Últimos módulos tocados: ${changed.join(", ")}`);
-    }
   }
 }
 

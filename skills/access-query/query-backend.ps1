@@ -133,6 +133,7 @@ elseif ($CreateTable){ Write-Host 'ERROR: -CreateTable requiere -Exec "CREATE TA
 # =============================================================================
 
 if ($PSScriptRoot) { $ScriptDir = $PSScriptRoot } else { $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path }
+$CurrentDir = (Get-Location).Path
 $configPath = Join-Path $ScriptDir 'backends.json'
 if (-not (Test-Path $configPath)) {
     Write-Host 'ERROR: backends.json no encontrado' -ForegroundColor Red
@@ -218,14 +219,59 @@ function Get-Connection {
     return $conn
 }
 
+function Expand-PortablePath {
+    param([string]$PathValue)
+
+    if ([string]::IsNullOrWhiteSpace($PathValue)) { return $PathValue }
+
+    $expanded = $PathValue.Trim().Trim('"')
+    $expanded = [System.Environment]::ExpandEnvironmentVariables($expanded)
+
+    if ($expanded -match '^[~](?:[\\/]|$)') {
+        $userProfile = [System.Environment]::GetFolderPath('UserProfile')
+        $expanded = Join-Path $userProfile ($expanded.Substring(1).TrimStart('\', '/'))
+    }
+
+    return $expanded
+}
+
+function Resolve-ExistingPortablePath {
+    param(
+        [Parameter(Mandatory=$true)][string]$PathValue,
+        [string[]]$BasePaths = @(),
+        [string]$Label = 'Ruta'
+    )
+
+    $expanded = Expand-PortablePath -PathValue $PathValue
+    $candidates = [System.Collections.Generic.List[string]]::new()
+
+    if ([System.IO.Path]::IsPathRooted($expanded)) {
+        $candidates.Add([System.IO.Path]::GetFullPath($expanded))
+    } else {
+        foreach ($base in ($BasePaths | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })) {
+            try {
+                $full = [System.IO.Path]::GetFullPath((Join-Path $base $expanded))
+                if (-not $candidates.Contains($full)) { $candidates.Add($full) }
+            } catch {}
+        }
+    }
+
+    foreach ($candidate in $candidates) {
+        if (Test-Path $candidate) { return $candidate }
+    }
+
+    $tried = if ($candidates.Count -gt 0) { $candidates -join ' | ' } else { $expanded }
+    Write-Host "ERROR: $Label no encontrado. Valor recibido: $PathValue" -ForegroundColor Red
+    Write-Host "  Rutas probadas: $tried" -ForegroundColor Yellow
+    exit 1
+}
+
 function Get-BackendPath {
     param([string]$Name, [string]$OverridePath)
     if ($OverridePath) {
-        if (-not (Test-Path $OverridePath)) {
-            Write-Host 'ERROR: Ruta no encontrada' -ForegroundColor Red; exit 1
-        }
+        $resolvedPath = Resolve-ExistingPortablePath -PathValue $OverridePath -BasePaths @($CurrentDir, $ScriptDir) -Label 'BackendPath'
         $resolvedPw = Resolve-Password -BackendName '__direct__' -CliPassword $cliPasswordValue -CliPasswordSet $cliPasswordSet -JsonPassword ''
-        return @{ Path = $OverridePath; Password = $resolvedPw; Name = (Split-Path $OverridePath -Leaf) }
+        return @{ Path = $resolvedPath; Password = $resolvedPw; Name = (Split-Path $resolvedPath -Leaf) }
     }
     if ($Name -eq '') { $Name = $defaultBackend }
     if (-not $backendMap.ContainsKey($Name)) {
@@ -234,7 +280,8 @@ function Get-BackendPath {
     $info = $backendMap[$Name]
     $jsonPw = if ($info.PSObject.Properties['password']) { $info.password } else { '' }
     $resolvedPw = Resolve-Password -BackendName $Name -CliPassword $cliPasswordValue -CliPasswordSet $cliPasswordSet -JsonPassword $jsonPw
-    return @{ Path = $info.path; Password = $resolvedPw; Name = $Name }
+    $resolvedPath = Resolve-ExistingPortablePath -PathValue ([string]$info.path) -BasePaths @($CurrentDir, $ScriptDir) -Label ("Backend '{0}'" -f $Name)
+    return @{ Path = $resolvedPath; Password = $resolvedPw; Name = $Name }
 }
 
 function Format-Value {
@@ -343,17 +390,27 @@ function Test-IsWriteStatement {
 function Assert-WriteAllowed {
     param(
         [string]$SqlText,
-        [System.Collections.Generic.HashSet[string]]$LinkedTables,
+        $LinkedTables,
         [string[]]$DenyList,
         [string[]]$AllowList
     )
     $targets = Extract-TableNames -SqlText $SqlText -WriteTargetsOnly
     $blocked = @()
+    $linkedSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+
+    if ($LinkedTables) {
+        foreach ($linkedName in $LinkedTables) {
+            if (-not [string]::IsNullOrWhiteSpace([string]$linkedName)) {
+                [void]$linkedSet.Add([string]$linkedName)
+            }
+        }
+    }
+
     foreach ($tbl in $targets) {
         foreach ($deny in $DenyList) {
             if ($tbl -like $deny) { $blocked += "DENY: '$tbl' coincide con pattern '$deny'" }
         }
-        if ($LinkedTables.Contains($tbl)) { $blocked += "LINKED: '$tbl' es tabla LINKED/EXTERNA" }
+        if ($linkedSet.Contains([string]$tbl)) { $blocked += "LINKED: '$tbl' es tabla LINKED/EXTERNA" }
         if ($AllowList.Count -gt 0) {
             $allowed = $false
             foreach ($allow in $AllowList) { if ($tbl -like $allow) { $allowed = $true; break } }
@@ -792,10 +849,7 @@ if ($Mode -in @('Exec','Script','Seed','Teardown','DDL')) {
     $t = Get-BackendPath -Name $Backend -OverridePath $BackendPath
 
     if ($SqlInput -eq '__FILE__') {
-        $scriptPath = $Script
-        if (-not (Test-Path $scriptPath)) {
-            Write-Host "ERROR: Fichero no encontrado: $scriptPath" -ForegroundColor Red; exit 1
-        }
+        $scriptPath = Resolve-ExistingPortablePath -PathValue $Script -BasePaths @($CurrentDir, $ScriptDir) -Label 'Script SQL'
         $sqlContent = Get-Content $scriptPath -Raw -Encoding UTF8
         $statements = Split-SqlStatements -SqlBlock $sqlContent
         if (-not $Json) {

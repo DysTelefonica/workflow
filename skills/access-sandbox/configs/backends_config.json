@@ -1,0 +1,23 @@
+{
+  "localSandboxPath": "C:\\00repos\\datos",
+  "productionPaths": [
+    "\\\\datoste\\Aplicaciones_dys\\Aplicaciones PpD\\0Lanzadera\\Lanzadera_Datos.accdb",
+    "\\\\datoste\\Aplicaciones_dys\\Aplicaciones PpD\\00Recursos\\Correos_datos.accdb",
+    "\\\\datoste\\Aplicaciones_dys\\Aplicaciones PpD\\00Recursos\\Tareas_datos1.accdb",
+    "\\\\datoste\\Aplicaciones_dys\\Aplicaciones PpD\\AGEDO\\AGEDO20_Datos.accdb",
+    "\\\\datoste\\Aplicaciones_dys\\Aplicaciones PpD\\BRASS\\Gestion_Brass_Gestion_Datos.accdb",
+    "\\\\datoste\\Aplicaciones_dys\\Aplicaciones PpD\\CONDOR\\condor_datos.accdb",
+    "\\\\datoste\\Aplicaciones_dys\\Aplicaciones PpD\\CONDOR Prueba\\condor_datos.accdb",
+    "\\\\datoste\\Aplicaciones_dys\\Aplicaciones PpD\\EXPEDIENTES\\Expedientes_datos.accdb",
+    "\\\\datoste\\Aplicaciones_dys\\Aplicaciones PpD\\GESTION CONTRATOS\\GestionContratos_datos.accdb",
+    "\\\\datoste\\Aplicaciones_dys\\Aplicaciones PpD\\GESTION RIESGOS\\Gestion_Riesgos_Datos.accdb",
+    "\\\\datoste\\Aplicaciones_dys\\Aplicaciones PpD\\HPS\\HPST.accdb",
+    "\\\\datoste\\Aplicaciones_dys\\Aplicaciones PpD\\No Conformidades\\NoConformidades_Datos.accdb",
+    "\\\\datoste\\Aplicaciones_dys\\Aplicaciones PpD\\Proyectos\\AGEDYS_DATOS.accdb",
+    "\\\\datoste\\Aplicaciones_dys\\Aplicaciones PpD\\REGISTROS\\Registro_Datos.accdb",
+    "\\\\datoste\\Aplicaciones_dys\\Aplicaciones PpD\\REGISTROS\\Registro_Ent_Salida_Datos.accdb",
+    "\\\\datoste\\Aplicaciones_dys\\Aplicaciones PpD\\Seguridad\\Seguridad_datos.accdb",
+    "\\\\datoste\\Aplicaciones_dys\\Aplicaciones PpD\\SICA\\SICA_datos.accdb",
+    "\\\\datoste\\Aplicaciones_dys\\Aplicaciones PpD\\SOLICITUDES HPS\\Solicitudes_HPS_datos.accdb"
+  ]
+}

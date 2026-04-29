@@ -1,0 +1,21 @@
+{
+  "sourceFolder": "C:\\Users\\adm1\\Telefonica\\Aplicaciones_dys.TMETF - Aplicaciones PpD\\000datoslocal",
+  "localSandboxPath": "C:\\00repos\\datos",
+  "productionPaths": [
+    "C:\\Users\\adm1\\Telefonica\\Aplicaciones_dys.TMETF - Aplicaciones PpD\\000datoslocal\\AGEDO20_Datos.accdb",
+    "C:\\Users\\adm1\\Telefonica\\Aplicaciones_dys.TMETF - Aplicaciones PpD\\000datoslocal\\AGEDYS_DATOS.accdb",
+    "C:\\Users\\adm1\\Telefonica\\Aplicaciones_dys.TMETF - Aplicaciones PpD\\000datoslocal\\condor_datos.accdb",
+    "C:\\Users\\adm1\\Telefonica\\Aplicaciones_dys.TMETF - Aplicaciones PpD\\000datoslocal\\correos_datos.accdb",
+    "C:\\Users\\adm1\\Telefonica\\Aplicaciones_dys.TMETF - Aplicaciones PpD\\000datoslocal\\Expedientes_datos.accdb",
+    "C:\\Users\\adm1\\Telefonica\\Aplicaciones_dys.TMETF - Aplicaciones PpD\\000datoslocal\\Gestion_Brass_Gestion_Datos.accdb",
+    "C:\\Users\\adm1\\Telefonica\\Aplicaciones_dys.TMETF - Aplicaciones PpD\\000datoslocal\\Gestion_Riesgos_Datos.accdb",
+    "C:\\Users\\adm1\\Telefonica\\Aplicaciones_dys.TMETF - Aplicaciones PpD\\000datoslocal\\HPST.accdb",
+    "C:\\Users\\adm1\\Telefonica\\Aplicaciones_dys.TMETF - Aplicaciones PpD\\000datoslocal\\Lanzadera_Datos.accdb",
+    "C:\\Users\\adm1\\Telefonica\\Aplicaciones_dys.TMETF - Aplicaciones PpD\\000datoslocal\\NoConformidades_Datos.accdb",
+    "C:\\Users\\adm1\\Telefonica\\Aplicaciones_dys.TMETF - Aplicaciones PpD\\000datoslocal\\Registro_Datos.accdb",
+    "C:\\Users\\adm1\\Telefonica\\Aplicaciones_dys.TMETF - Aplicaciones PpD\\000datoslocal\\Registro_Ent_Salida_Datos.accdb",
+    "C:\\Users\\adm1\\Telefonica\\Aplicaciones_dys.TMETF - Aplicaciones PpD\\000datoslocal\\Seguridad_datos.accdb",
+    "C:\\Users\\adm1\\Telefonica\\Aplicaciones_dys.TMETF - Aplicaciones PpD\\000datoslocal\\SICA_datos.accdb",
+    "C:\\Users\\adm1\\Telefonica\\Aplicaciones_dys.TMETF - Aplicaciones PpD\\000datoslocal\\Solicitudes_HPS_datos.accdb"
+  ]
+}

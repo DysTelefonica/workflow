@@ -1,575 +1,371 @@
----
-name: access-vba-sync
-description: >
-  Navaja suiza global para workflows de Microsoft Access/VBA con código fuera del binario,
-  sincronización bidireccional con archivos en disco y soporte para Git.
-  Trigger: úsala SIEMPRE que una IA vaya a modificar, haya modificado o deba sincronizar
-  código VBA/Access en proyectos que usen este workflow, especialmente antes de importar
-  cambios a la BD o al preparar snapshots/exportaciones.
-license: Apache-2.0
-metadata:
-  author: gentleman-programming
-  version: "2.0"
----
+# SKILL.md — Skill para workflow Access/VBA (Export → Trabajo → Sync → Compilar → ERD → Cierre)
 
-# access-vba-sync
+## Objetivo
+Definir un **skill** que automatice el workflow de desarrollo y documentación en un proyecto Microsoft Access/VBA:
 
-## Cuándo usar esta skill
+1) **Al inicio** de una nueva feature/fix: **Exportar TODOS los módulos** del proyecto VBA a disco (snapshot base).
+2) Se trabaja sobre la mejora editando los archivos exportados (normalmente con IA).
+3) **Todo módulo modificado por la IA debe sincronizarse** (Import) hacia el VBA real de la BD.
+4) Tras cada sincronización, el skill **debe proponer al usuario compilar** el proyecto en el VBE.
+5) **Generación de documentación**: Extraer estructura de tablas (ERD/Diccionario) a Markdown para contexto de la IA.
+6) **Al cerrar** la tarea (fin de sesión): export final opcional (snapshot consistente) + resumen.
 
-Usá esta skill en cualquier proyecto Access/VBA donde el código viva temporalmente fuera del binario para poder:
-
-- trabajar con Git
-- editar módulos con IA
-- exportar/importar entre la BD Access y archivos en disco
-- generar contexto técnico (ERD)
-- crear un sandbox local de backends vinculados
-
-### Trigger principal
-
-**Si una IA cambió cualquier archivo VBA exportado (`.bas`, `.cls`, `.form.txt`, `.report.txt`, `.frm`) o va a cambiarlo, esta skill DEBE usarse.**
-
-Porque al final esos cambios tienen que volver al binario de Access mediante import/sync.
+> El skill es **autocontenido**: incluye `VBAManager.ps1` y todo lo necesario para ejecutarse sin dependencias externas.
 
 ---
 
-## Qué problema resuelve
-
-Access guarda formularios, módulos y clases dentro de un binario (`.accdb`, `.mdb`, etc.). Eso dificulta:
-
-- versionado real con Git
-- diffs útiles
-- edición asistida por IA
-- revisión de cambios
-- documentación del modelo de datos
-
-Esta skill convierte ese workflow en uno repetible:
-
-1. exportás desde Access a disco
-2. editás archivos fuera del binario
-3. sincronizás/importás de vuelta a Access
-4. compilás manualmente en VBE
-5. opcionalmente generás ERD o armás sandbox local
+## Alcance y supuestos
+- Entorno: **Windows** con Microsoft Access instalado (automatización COM y DAO).
+- El repositorio contiene una BD Access (`.accdb/.accde/.mdb/.mde`) en la raíz del proyecto, o el usuario la pasa por parámetro.
+- La exportación se guarda bajo una carpeta configurable (default `src/`).
+- La documentación se genera en `docs/ERD/` o ruta configurable.
+- El skill cierra automáticamente cualquier instancia de Access que tenga abierta la BD objetivo (usando ROT para no afectar otras BDs abiertas).
 
 ---
 
-## Regla de oro
+## Capacidades del PS1 (VBAManager.ps1)
 
-### El código fuente de trabajo está en disco; la verdad ejecutable final está en Access.
+El PS1 es el motor que ejecuta todas las operaciones sobre Access. Acepta los siguientes parámetros:
 
-Eso significa:
-
-- la IA **edita archivos exportados**
-- luego hay que **importarlos** a la BD
-- el ciclo no termina hasta que los cambios estén dentro de Access
-
----
-
-## Regla crítica sobre `start` y `export-all`
-
-### EXTREMO CUIDADO
-
-`start` y `export-all` vuelcan el código del binario Access hacia disco.
-
-Si la IA ya modificó archivos exportados y todavía no los importaste, ejecutar:
-
-- `start`
-- `export-all`
-- o `export` sobre esos módulos
-
-puede **pisar en disco el trabajo nuevo con código viejo del binario**.
-
-## Interpretación obligatoria para IA
-
-### Antes de ejecutar `start`, `export-all` o `export <módulos>` preguntate:
-
-**¿Estoy seguro de que no voy a sobrescribir cambios locales más nuevos que todavía no fueron importados?**
-
-Si la respuesta no es un **sí claro**, no exportes.
-
-### Regla operativa
-
-- **Si la IA acaba de modificar archivos en `src/`** → normalmente corresponde `import`, no `start` ni `export-all`
-- **Si querés tomar snapshot inicial desde la BD** y todavía no hubo cambios locales → `start` o `export-all` sí
-- **Si hay duda entre exportar o importar** → priorizá proteger el trabajo local y no sobrescribirlo
-
----
-
-## Arquitectura real del workflow
-
-Esta skill tiene 3 capas. No las confundas.
-
-### 1. `VBAManager.ps1`
-Motor PowerShell que opera sobre Access/DAO/COM.
-
-Acciones reales:
-
-- `Export`
-- `Import`
-- `Fix-Encoding`
-- `Generate-ERD`
-- `Sandbox`
-
-### 2. `handler.js`
-Orquesta sesión, debounce, watcher, sync de CodeBehind y UX del workflow.
-
-### 3. `cli.js`
-Interfaz de comandos para usar el workflow desde terminal.
-
----
-
-## Archivos clave
-
-En un proyecto típico, esta skill vive globalmente pero opera sobre el proyecto actual (`cwd`).
-
-### Archivos del skill
-- `skills/access-vba-sync/VBAManager.ps1`
-- `skills/access-vba-sync/handler.js`
-- `skills/access-vba-sync/cli.js`
-- `skills/access-vba-sync/SKILL.md`
-
-### Archivos del proyecto afectados
-- `<projectRoot>/*.accdb|*.accde|*.mdb|*.mde`
-- `<projectRoot>/src/modules/*.bas`
-- `<projectRoot>/src/classes/*.cls`
-- `<projectRoot>/src/forms/*.form.txt`
-- `<projectRoot>/src/forms/*.cls`
-- `<projectRoot>/src/reports/*.report.txt`
-- `<projectRoot>/src/reports/*.cls`
-- `<projectRoot>/docs/ERD/*.md`
-- `<projectRoot>/.access-vba-skill/session.json`
-
----
-
-## Capacidades reales
-
-## Export
-Exporta desde Access a disco.
-
-### Qué exporta
-- módulos estándar → `.bas`
-- clases → `.cls`
-- formularios → `.form.txt` + `.cls`
-- reportes → `.report.txt` + `.cls`
-
-### Cuándo usarlo
-- snapshot inicial de una BD todavía no exportada
-- snapshot final explícito y consciente
-- export selectivo de un módulo que todavía no está en disco
-
-### Cuándo NO usarlo
-- después de que la IA ya editó archivos locales no importados
-- como reflejo automático “por las dudas”
-
----
-
-## Import
-Importa cambios desde disco hacia la BD Access.
-
-### Este es el comando normal después de cambios hechos por IA.
-
-Usalo cuando:
-- la IA modificó `.bas`
-- la IA modificó `.cls`
-- la IA modificó `.form.txt`
-- la IA modificó `.report.txt`
-- querés sincronizar de vuelta al binario
-
-### Modos
-- `Auto`
-- `Form`
-- `Code`
-
----
-
-## Fix-Encoding
-Corrige problemas de encoding:
-- BOM en disco
-- resync hacia Access
-
-No lo uses como rutina por defecto si no hay problema real de encoding.
-
----
-
-## Generate-ERD
-Genera documentación Markdown de tablas, campos, índices, PKs y relaciones.
-
-Usalo cuando la IA necesite contexto del modelo de datos.
-
----
-
-## Sandbox
-Copia backends vinculados al lado del frontend y revincula a copias locales.
-
-Usalo cuando querés trabajar aislado de producción o de una red compartida.
-
-### Importante
-`Sandbox` es una acción real del PS1. No es solo una capa del CLI.
-
----
-
-## Comandos CLI que la IA debe conocer
-
-| Comando | Uso principal | Riesgo |
+| Parámetro | Tipo | Descripción |
 |---|---|---|
-| `start` | export inicial + sesión | **ALTO**: puede sobrescribir cambios locales |
-| `watch` | auto-import al guardar archivos | medio |
-| `export <Mod...>` | export selectivo | **ALTO** si hay cambios locales no importados |
-| `export-all` | export total | **ALTO** si hay cambios locales no importados |
-| `import <Mod...>` | importar módulos selectivos | bajo |
-| `import-form <Mod...>` | importar UI de documentos Access (`.form.txt` / `.report.txt`) | bajo |
-| `import-code <Mod...>` | importar solo code-behind de `Form_` / `Report_` | bajo |
-| `import-all` | importar todo `src/` | medio |
-| `fix-encoding [Mod...]` | corregir encoding | medio |
-| `generate-erd` | documentación técnica | bajo |
-| `sandbox` | sandbox local de backends | medio |
-| `list-objects` | inspección del frontend real | bajo |
-| `exists <Mod>` | verificar si un objeto/módulo existe de verdad | bajo |
-| `status` | inspeccionar sesión | bajo |
-| `end` | cierre de sesión + export final opcional | medio |
+| `-Action` | `Export\|Import\|Fix-Encoding\|Generate-ERD` | **Obligatorio**. Acción a ejecutar |
+| `-AccessPath` | string | Ruta a la BD frontend |
+| `-Password` | string | Contraseña de la BD (default en el script) |
+| `-DestinationRoot` | string | Carpeta raíz de export/import (default: `src`) |
+| `-ModuleName` | string[] | Uno o más nombres de módulo para operaciones selectivas |
+| `-ImportMode` | `Auto\|Form\|Code` | Solo para `Import`: `Auto` (default), `Form` (forzar `.form.txt/.frm`), `Code` (forzar `.cls/.bas`) |
+| `-BackendPath` | string | Ruta al backend `*_Datos.accdb` para Generate-ERD |
+| `-ErdPath` | string | Carpeta de salida del ERD |
+| `-Location` | `Both\|Src\|Access` | Ámbito de Fix-Encoding (default: `Both`) |
+
+### Acciones
+
+**`Export`** — Exporta módulos VBA de la BD a disco:
+- Sin `-ModuleName`: exporta todos los módulos
+- Con `-ModuleName A B C`: exporta solo los indicados
+- Formularios: usa `SaveAsText` → `.form.txt` (UI + código) y `.cls` (solo código)
+- Módulos/clases: usa `VBComponents.Export` → `.bas` / `.cls`
+
+**`Import`** — Importa módulos desde disco a la BD:
+- Sin `-ModuleName`: importa todos los archivos de `src/`
+- Con `-ModuleName A B C`: importa solo los indicados
+- Modo por defecto `-ImportMode Auto`: prioridad `.form.txt` > `.frm` > `.cls` > `.bas`
+- `-ImportMode Form`: importa solo layout/formulario (`.form.txt/.frm`)
+- `-ImportMode Code`: importa solo code-behind (`.cls/.bas`)
+- Formularios (`.form.txt`): usa `LoadFromText` — completamente silencioso
+- Módulos/clases: usa `DeleteLines + AddFromFile` — sin diálogos VBE
+
+**`Fix-Encoding`** — Corrige encoding ANSI↔UTF-8:
+- `-Location Src`: corrige BOM en archivos de `src/`
+- `-Location Access`: reimporta desde `src/` para corregir en la BD
+- `-Location Both` (default): ambos
+- Selectivo con `-ModuleName`
+
+**`Generate-ERD`** — Genera ERD en Markdown:
+- Lee tablas, campos, tipos DAO, PKs e índices, y relaciones
+- Detecta backends vinculados no alcanzables y los documenta
+- Autodetecta `*_Datos.accdb` si no se pasa `-BackendPath`
 
 ---
 
-## Decisión rápida: qué comando usar
+## Comandos del CLI (cli.js)
 
-## Caso A — La IA ya cambió archivos en `src/`
-### Usar:
-- `import <módulos>`
-- `import-code <módulos>` **solo** para document modules (`Form_...` / `Report_...`)
-- `import-form <módulos>`
-- `import-all` si está controlado
+El CLI es la interfaz de usuario sobre el PS1. Todos los comandos que expone mapean directamente a acciones del PS1.
 
-### No usar por defecto:
-- `start`
-- `export-all`
-- `export`
+### Tabla de comandos
 
----
+| Comando CLI | Acción PS1 | Módulos | Descripción |
+|---|---|---|---|
+| `start` | `Export` | todos | Export inicial + inicia sesión |
+| `watch` | `Import` (auto) | modificados | Auto-sync al detectar cambios en src/ |
+| `export <Mod...>` | `Export` | selectivo | Exporta módulos específicos |
+| `export-all` | `Export` | todos | Exporta todos sin iniciar sesión |
+| `import <Mod...>` | `Import` | selectivo | Importa módulos específicos |
+| `import-form <Mod...>` | `Import` (`ImportMode=Form`) | selectivo | Importa formularios desde `*.form.txt`/`*.frm` (UI + código) |
+| `import-code <Mod...>` | `Import` (`ImportMode=Code`) | selectivo | Importa solo code-behind desde `*.cls`/`*.bas` |
+| `import-all` | `Import` | todos | Importa todo src/ |
+| `sync <Mod...>` | `Import` | selectivo | Alias de import |
+| `fix-encoding [Mod...]` | `Fix-Encoding` | selectivo/todos | Corrige encoding |
+| `generate-erd` | `Generate-ERD` | — | Genera ERD Markdown |
+| `status` | — | — | Muestra estado de sesión |
+| `end` | `Export` (opcional) | todos | Cierra sesión + export final |
 
-## Caso B — Recién arrancás y querés sacar el código fuera del binario
-### Usar:
-- `start`
-- o `export-all`
+### Ejecución secuencial obligatoria
 
-### Condición obligatoria:
-- no debe haber trabajo local más nuevo que el binario
+⚠️ **Cada comando `import`, `import-code` o `import-form` cierra Access al inicio** (Kill via ROT). Por eso:
 
----
+- **NUNCA encadenar comandos con `&&` o `;`** — el segundo comando falla porque Access ya fue cerrado por el primero
+- **Ejecutar cada comando en su PROPIA llamada** — esperar el resultado antes de invocar el siguiente
+- **Módulos normales (`import`) primero**, luego formularios (`import-code` o `import-form`) en una sola llamada si son varios
 
-## Caso C — Necesitás contexto de datos para la IA
-### Usar:
-- `generate-erd`
+```powershell
+# ✅ Correcto: uno por vez
+node cli.js import NombreModulo --access "MiBD.accdb"
+node cli.js import-code Form_A --access "MiBD.accdb"
+node cli.js import-code Form_B Form_C --access "MiBD.accdb"
 
----
-
-## Caso D — Querés trabajar sin tocar backends reales
-### Usar:
-- `sandbox`
-
-## Caso E — La IA no sabe si un formulario/reporte/módulo existe realmente en la BD
-### Usar:
-- `list-objects`
-- `exists <Modulo>`
-
-### Regla operativa
-Antes de intentar crear o importar un subform/reporte dudoso, inspeccioná el frontend real.  
-No adivines si el objeto existe.
-
----
-
-## Formularios: reglas críticas
-
-Los formularios tienen dos artefactos principales:
-
-- `.form.txt` → UI + definición completa del objeto Access
-- `.cls` → código VBA del formulario
-
-Los reportes siguen la misma idea:
-
-- `.report.txt` → UI + definición completa del reporte
-- `.cls` → código VBA del reporte
-
-## Regla obligatoria
-
-### Código VBA del formulario
-Editar **preferentemente el `.cls`**.
-
-### UI / layout / controles / propiedades
-Editar **el `.form.txt`**.
-
----
-
-## Sobre `CodeBehind`
-
-El handler sincroniza automáticamente el `CodeBehind` del `.form.txt` o `.report.txt` a partir del `.cls` antes de ciertos imports.
-
-### Consecuencia práctica
-- para cambios de código, el archivo maestro debe ser el `.cls`
-- para cambios visuales, el archivo maestro es el `.form.txt` o `.report.txt`
-
-### No hagas esto
-- no generes un `.form.txt` desde cero
-- no generes un `.report.txt` desde cero
-- no inventes sintaxis del formato Access
-- no asumas que editar a mano el `CodeBehind` dentro del `.form.txt` es el flujo ideal
-
-### Sí hacé esto
-- partí siempre de un `.form.txt` exportado por Access
-- partí siempre de un `.report.txt` exportado por Access si trabajás con reportes
-- modificá solo lo necesario
-- si el cambio es de lógica, preferí el `.cls`
-
----
-
-## Forms vs Reports
-
-### Regla importante para IA
-No asumas que todo document module es un formulario.
-
-Access distingue al menos:
-- forms
-- reports
-
-Si el motor necesita importar/exportar objetos de documento, debe resolver correctamente el tipo Access real. No reforzar el supuesto simplista de que todo `vbext_ct_Document` = form.
-
-### Consecuencia práctica
-- `import-form` también puede terminar importando reportes si el archivo fuente real es `.report.txt`
-- `import-code` sincroniza `CodeBehind` tanto para forms como para reports antes de importar
-
----
-
-## Compilación
-
-Después de importar cambios, la skill/CLI puede **recordar** al usuario que compile.
-
-### Pero la compilación es manual
-
-Abrir Access → VBE → `Debug -> Compile`
-
-La skill no sustituye esa validación.
-
----
-
-## Gestión de sesión
-
-La sesión se persiste en:
-
-- `.access-vba-skill/session.json`
-
-Eso permite:
-- `watch`
-- `status`
-- `end`
-- tracking de módulos cambiados y pendientes
-
-La IA puede usar `status` para entender el estado antes de decidir acciones destructivas.
-
-## Introspección del frontend
-
-La skill ya puede inspeccionar la BD real para que la IA no trabaje a ciegas.
-
-### `list-objects`
-Lista:
-- forms
-- reports
-- modules
-- classes
-- documentModules
-
-Uso:
-
-```bash
-node cli.js list-objects --access MiBD.accdb
-node cli.js list-objects --access MiBD.accdb --json
+# ❌ Incorrecto: falla en el segundo comando
+node cli.js import NombreModulo --access "MiBD.accdb" && node cli.js import-code Form_A --access "MiBD.accdb"
 ```
 
-### `exists <Modulo>`
-Responde si un nombre dado existe en la BD y sugiere el tipo de import.
+### Flags del CLI
 
-Uso:
+| Flag | Mapea a PS1 | Default |
+|---|---|---|
+| `--access <ruta>` | `-AccessPath` | Autodetecta en CWD |
+| `--password <pwd>` | `-Password` | — |
+| `--destination_root <dir>` | `-DestinationRoot` | `src` |
+| `--location Both\|Src\|Access` | `-Location` | `Both` |
+| `--backend <ruta>` | `-BackendPath` | Autodetecta `*_Datos.accdb` |
+| `--erd_path <dir>` | `-ErdPath` | `docs/ERD` |
+| `--debounce_ms <n>` | — (Node.js) | `600` |
+| `--auto_export_on_end false` | — (Node.js) | `true` |
 
-```bash
-node cli.js exists Form_subfrmDatosPCSUB_Propuesta --access MiBD.accdb
-node cli.js exists Form_subfrmDatosPCSUB_Propuesta --access MiBD.accdb --json
+---
+
+## Estructura de archivos exportados
+
+```
+<DestinationRoot>/
+├── modules/          # Tipo 1 (vbext_ct_StdModule)   → .bas
+├── classes/          # Tipo 2 (vbext_ct_ClassModule)  → .cls
+└── forms/            # Tipo 3/100 (formularios)
+    ├── Form_X.form.txt   # UI + código (SaveAsText, acForm=2)
+    └── Form_X.cls        # Solo código VBA
 ```
 
-### Cuándo usarlo
-- cuando un `import-form` falla y no sabés si el objeto existe
-- cuando un `import-code` depende de un objeto base en Access
-- cuando la IA necesita distinguir entre:
-  - objeto Access existente
-  - VBComponent existente
-  - módulo/clase existente
-
----
-
-## Reglas de seguridad operacional
-
-## 1. No exportar a ciegas
-Nunca uses `start` o `export-all` si podés pisar trabajo local más nuevo.
-
-## 2. No asumir que la BD está cerrada
-Idealmente no debería estar abierta por el usuario, pero el PS1 intenta cerrar la instancia objetivo si la detecta.
-
-## 3. No asumir soporte mágico
-Si algo depende de:
-- Access instalado
-- COM
-- DAO
-- rutas válidas
-- contraseñas
-
-verificalo.
-
-## 4. No prometer fallbacks que no existen
-Si `SaveAsText` o `LoadFromText` fallan, no supongas que el script siempre tiene fallback silencioso.
-
-## 5. No inventar comandos
-Si un comando no existe en `cli.js`, no lo uses.
-
-## 6. No asumir semántica inexistente en `--keep_sidecars`
-Hoy `--keep_sidecars` es esencialmente informativo: los sidecars del sandbox se conservan igualmente. No bases lógica crítica en que ese flag limpie o no limpie archivos.
-
----
-
-## Anti-patrones
-
-### No hagas esto
-- ejecutar `start` después de que la IA ya cambió archivos en `src/`
-- usar `export-all` para “sincronizar” cambios locales al binario
-- crear `.form.txt` desde cero
-- crear `.report.txt` desde cero
-- asumir que `Sandbox` limpia sidecars automáticamente si no está implementado así
-- asumir que reportes siguen exactamente el mismo flujo que formularios
-- mezclar en la explicación lo que hace el PS1 con lo que hace el handler sin aclararlo
-
----
-
-## Workflow recomendado para IA
-
-## Flujo normal tras cambios hechos por IA
-
-```bash
-node cli.js status
-node cli.js import <Mod1> <Mod2>
-# o import-code / import-form según el caso
+Ejemplo real:
 ```
-
-Luego:
-- pedir o recordar compilación manual en Access/VBE
-
----
-
-## Flujo de inicio seguro
-
-```bash
-node cli.js status
-# verificar que no hay cambios locales pendientes de proteger
-node cli.js start --access <BD>
+src/modules/VariablesGlobales.bas
+src/classes/CUsuario.cls
+src/forms/Form_FormGestion.form.txt
+src/forms/Form_FormGestion.cls
 ```
 
 ---
 
-## Flujo con formularios
+## Comportamiento de formularios
 
-### Cambio de código de formulario/reporte
-```bash
-node cli.js import-code Form_MiFormulario
-```
+Los formularios Access tienen tratamiento especial respecto a módulos y clases:
 
-> `import-code` no es para clases normales ni módulos `.bas`.
-> Si el archivo vive en `classes/` o `modules/`, usar `import`.
-
-### Cambio de UI/layout
-```bash
-node cli.js import-form Form_MiFormulario
-```
-
-### Cambio de UI/layout en reporte
-```bash
-node cli.js import-form Report_MiReporte
-```
-
-### Si no estás seguro
-```bash
-node cli.js import Form_MiFormulario
-```
+- **Export**: `Application.SaveAsText(2, nombreSinPrefixForm_, ruta)`. El nombre del objeto Access es el nombre del VBComponent **sin** el prefijo `Form_`.
+- **Import**: `Application.LoadFromText(2, nombreSinPrefixForm_, ruta)`. Nunca usa `VBComponents.Import()`.
+- **Fallback en export**: si `SaveAsText` falla, usa `component.Export()` y registra el aviso.
+- Los formularios también generan un `.cls` paralelo con solo el código VBA para facilitar diff.
 
 ---
 
-## Flujo con ERD
+## Regla de oro: código en .cls, UI en .form.txt, sync automático
 
-```bash
-node cli.js generate-erd --backend <ruta_backend>
+**Nunca editar el CodeBehind del `.form.txt` directamente.** El flujo correcto es:
+
+1. **CAMBIO DE CÓDIGO VBA** → editar **SOLO el `.cls`**
+2. **CAMBIO DE UI** (propiedades de controles, layout) → editar **SOLO el `.form.txt`**
+3. **Antes de importar** (modo Code o Auto) → el handler sincroniza automáticamente el CodeBehind del `.form.txt` con el contenido del `.cls`
+
+### Por qué
+
+El `.cls` es el archivo "maestro" para código VBA. El `.form.txt` tiene dos secciones:
+- **UI** (antes de `CodeBehind`): propiedades de controles, layout
+- **CodeBehind** (después de `CodeBehind`): código VBA — **es un espejo del `.cls`**
+
+Cuando Access exporta un formulario, guarda el código en ambas secciones por separado. Si la IA modifica solo el `.cls` pero el CodeBehind del `.form.txt` está desincronizado, los cambios no se aplican correctamente.
+
+### Cómo funciona el sync automático
+
+En `import-modules` (handler.js), antes de invocar VBAManager.ps1 con `-ImportMode Code` o `-ImportMode Auto`:
+1. Se lee el contenido del `.cls`
+2. Se reemplaza la sección `CodeBehind` del `.form.txt` con ese contenido
+3. Se importa el `.form.txt` ya sincronizado a Access
+
+### Verificación manual
+
+Para verificar que `.cls` y `CodeBehind` coinciden sin hacer import:
+
+```powershell
+# Mostrar diferencias entre .cls y CodeBehind del .form.txt
+node cli.js verify-code Form_subfrmDatosCDCA_Generales
 ```
 
+(El comando `verify-code` aún no existe — por ahora verificar manualmente con diff o hacer import-code y confirmar que los cambios aparecen en Access.)
+
 ---
 
-## Flujo con sandbox
+## Flujo de modificación de UI de formularios por la IA
 
-```bash
-node cli.js sandbox --access <frontend.accdb>
+Este es un caso de uso de primera clase del skill: **la IA modifica la interfaz de un formulario editando su `.form.txt` y el cambio se aplica a la BD**.
+
+### El ciclo completo
+
+```
+export Form_X  →  IA edita src/forms/Form_X.form.txt  →  import Form_X
 ```
 
----
+El `.form.txt` contiene tanto la definición de controles y propiedades (UI) como el código VBA. Al importarlo con `LoadFromText`, Access recarga el formulario completo — UI y código — reflejando todos los cambios.
 
-## Checklist mental antes de actuar
+### Comandos para este flujo
 
-Antes de ejecutar cualquier comando, la IA debe chequear:
+```powershell
+# 1. Exportar el formulario a src/ (si no está ya exportado)
+node cli.js export Form_FormGestion
 
-- [ ] ¿Estoy exportando o importando?
-- [ ] ¿Hay riesgo de sobrescribir cambios locales nuevos?
-- [ ] ¿El cambio está en `.cls`, `.form.txt`, o ambos?
-- [ ] ¿Necesito `import`, `import-code` o `import-form`?
-- [ ] ¿Necesito contexto de datos (`generate-erd`)?
-- [ ] ¿Estoy trabajando contra producción o necesito `sandbox`?
+# 2. La IA edita src/forms/Form_FormGestion.form.txt
+#    (propiedades de controles, nuevos botones, layout, etc.)
 
----
+# 3. Importar el formulario modificado a la BD
+node cli.js import Form_FormGestion
 
-## Comandos canónicos
-
-```bash
-# Export inicial (PELIGROSO si hay cambios locales no importados)
-node cli.js start --access MiBD.accdb
-
-# Export total consciente (PELIGROSO si hay cambios locales no importados)
-node cli.js export-all --access MiBD.accdb
-
-# Import selectivo tras cambios hechos por IA
-node cli.js import Mod_Utilidades Form_MiFormulario
-
-# Import solo código
-node cli.js import-code Form_MiFormulario
-
-# Import solo UI/formulario
-node cli.js import-form Form_MiFormulario
-
-# Auto-sync mientras se edita
-node cli.js watch --access MiBD.accdb
-
-# Generar ERD
-node cli.js generate-erd --backend MiBD_Datos.accdb
-
-# Crear sandbox
-node cli.js sandbox --access MiBD.accdb --backend_password xxx
-
-# Ver estado
-node cli.js status
-
-# Cerrar sesión
-node cli.js end
+# Varios formularios a la vez:
+node cli.js import Form_FormGestion Form_subfrmDetalle Form_FormBusqueda
 ```
 
+### En modo watch (automático)
+
+Con `watch` activo, cada vez que la IA guarda un `.form.txt` se importa automáticamente a la BD sin ninguna intervención:
+
+```powershell
+node cli.js watch
+# A partir de aquí: la IA edita y guarda .form.txt → se importa solo
+```
+
+### Regla crítica: nunca crear un `.form.txt` desde cero
+
+La IA **debe partir siempre de un `.form.txt` exportado con `export`**, nunca generarlo de cero. El formato es propietario de Access — si se introduce una línea mal formada, `LoadFromText` falla. El flujo correcto es siempre exportar primero para tener la base correcta y luego modificar.
+
+### Qué puede modificar la IA en el `.form.txt`
+
+El archivo tiene esta estructura general:
+
+```
+Version =21
+VersionRequired =20
+Begin Form
+    Width = ...
+    Caption = "..."
+    Begin Label etiqueta1
+        Left = ...
+        Top = ...
+        Caption = "Nombre:"
+    End
+    Begin TextBox txtNombre
+        Left = ...
+        Width = ...
+        ControlSource = "NombreCampo"
+    End
+    ...
+End
+CodeBehind
+    ' Aquí va el código VBA del formulario
+```
+
+La IA puede modificar con seguridad:
+- Propiedades de controles existentes (`Left`, `Top`, `Width`, `Height`, `Caption`, `Visible`, etc.)
+- Valores de `ControlSource`, `RowSource`, `DefaultValue`
+- Añadir nuevos controles copiando la estructura de uno existente
+
+Debe evitar:
+- Editar manualmente la sección `CodeBehind` del `.form.txt` (el skill la sincroniza desde el `.cls`)
+- Cambiar el `GUID` o `Checksum` del formulario (Access los regenera en el siguiente export)
+- Renombrar controles que tengan referencias en el código VBA sin actualizar también el código
+- Alterar la estructura de bloques `Begin`/`End` de forma que queden mal anidados
+
 ---
 
-## Lo que la IA debe recordar siempre
+## Comportamiento de sesión
 
-### Esta skill es la navaja suiza del workflow Access/VBA.
+El skill persiste el estado en `.access-vba-skill/session.json` en la raíz del proyecto:
 
-No es un detalle accesorio del proyecto.
-En estos proyectos, si la IA modifica código exportado, **esta skill forma parte obligatoria del cierre correcto del trabajo**.
+```json
+{
+  "active": true,
+  "startedAt": "2025-01-15T09:00:00.000Z",
+  "accessPath": "C:\\proyecto\\MiBD.accdb",
+  "destinationRoot": "C:\\proyecto\\src",
+  "modulesPath": "C:\\proyecto\\src",
+  "changedModules": ["Utilidades", "Form_FormGestion"],
+  "lastSyncAt": "2025-01-15T09:45:00.000Z",
+  "pendingModules": [],
+  "watcherPid": null
+}
+```
 
-Si la IA tocó código y no lo importó a Access, el trabajo está incompleto.
+Esto permite que `import`, `sync`, `end` y `status` funcionen sin mantener un proceso largo vivo.
 
-Y si la IA ejecuta `start` o `export-all` sin pensar, puede destruir su propio trabajo local pisándolo con el código viejo del binario.
+---
 
-Ese es el error que NO se puede cometer.
+## Gestión de Access (headless)
+
+Antes de abrir la BD el PS1 deshabilita temporalmente mediante DAO:
+- **AllowBypassKey**: habilitado para acceso sin restricciones
+- **StartupForm**: eliminado para que no abra el formulario de inicio
+- **AutoExec**: renombrado a `AutoExec_TraeBackup` para evitar ejecución
+
+La BD se abre con:
+```powershell
+$access.Visible = $false
+$access.UserControl = $false
+$access.AutomationSecurity = 1   # desactiva seguridad de macros
+$access.DoCmd.SetWarnings($false) # suprime diálogos de Access
+```
+
+Al cerrar, todos los valores se restauran al estado original.
+
+---
+
+## Estructura del paquete
+
+```
+<projectRoot>/
+  access-vba-sync/
+    VBAManager.ps1     # Motor PowerShell (Export/Import/Fix-Encoding/Generate-ERD)
+    handler.js         # Lógica Node.js (sesión, debounce, watcher, métodos del skill)
+    cli.js             # Interfaz de comandos
+    README.md          # Documentación de uso
+    SKILL.md           # Este documento (especificación)
+```
+
+> El skill vive en su carpeta pero opera con `projectRoot = cwd`, de forma que `src/` y `docs/ERD/` quedan en el proyecto y no dentro del skill.
+
+---
+
+## Flujo de trabajo esperado
+
+### Nueva feature/fix
+```
+start → (generate-erd) → IA edita src/ → watch|import → compilar VBE → end
+```
+
+1. `start` — Export total, snapshot base
+2. `generate-erd` — Contexto de datos para la IA (opcional)
+3. IA modifica archivos en `src/`
+4. `watch` (automático) o `import <módulos>` (manual)
+5. Compilar: **Abre Access → VBE → Debug → Compile**
+6. `end` — Sync final + export final opcional + resumen
+
+---
+
+## Casos límite cubiertos
+
+- Varias BDs en CWD → elección determinista (alfabético) + warning
+- Ruta relativa en `--access` → se resuelve contra CWD
+- Nombre de módulo sin extensión → `Resolve-ImportFileForModule` busca por prioridad: `.form.txt` > `.frm` > `.cls` > `.bas`
+- Formularios sin prefijo `Form_` → detectados por tipo de componente (tipo 3 o 100)
+- Guardados masivos simultáneos → batching con debounce configurable
+- Access abierto/bloqueado → error claro, no loops infinitos
+- BD con contraseña → `--password` propagado a todas las operaciones DAO y COM
+
+---
+
+## Pruebas mínimas
+
+- `start` con BD única → crea `src/modules/`, `src/classes/`, `src/forms/`
+- `start` sin BD en CWD → error claro
+- `export Form_X` → genera `src/forms/Form_X.form.txt` y `src/forms/Form_X.cls`
+- `import Form_X` → reimporta el formulario sin diálogos
+- `watch`: editar un `.bas` → se importa automáticamente tras debounce
+- `watch`: editar un `.form.txt` → se importa automáticamente
+- `fix-encoding --location Src` → solo toca archivos en `src/`
+- `import-all` → importa todos los archivos de `src/` sin intervención
+- `generate-erd` → genera `docs/ERD/NombreBackend.md`
+- `end` → export final + resumen con módulos tocados

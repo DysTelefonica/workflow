@@ -2,7 +2,7 @@
 [CmdletBinding()]
 Param(
     [Parameter(Mandatory = $true, Position = 0)]
-    [ValidateSet("Export", "Import", "Fix-Encoding", "Generate-ERD", "Sandbox", "List-Objects")]
+    [ValidateSet("Export", "Import", "Fix-Encoding", "Generate-ERD")]
     [string]$Action,
 
     [Parameter()]
@@ -36,144 +36,23 @@ Param(
 
     [Parameter()]
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSAvoidUsingPlainTextForPassword", "Password", Justification = "Requerido por especificacion del proyecto.")]
-    [string]$Password = "",
-
-    [Parameter()]
-    [Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSAvoidUsingPlainTextForPassword", "BackendPassword", Justification = "Requerido por especificacion del proyecto.")]
-    [string]$BackendPassword,
-
-    [Parameter()]
-    [switch]$KeepSidecars
+    [string]$Password = "dpddpd"
 )
 
 $ErrorActionPreference = "Stop"
-$script:AnsiCodePage = 1252
-$script:AC_TABLE = 0
-$script:AC_FORM = 2
-$script:AC_REPORT = 3
-$script:AC_SAVENO = 1
-$script:MSO_AUTOMATION_SECURITY_LOW = 1
-$script:VBEXT_CT_STDMODULE = 1
-$script:VBEXT_CT_CLASSMODULE = 2
-$script:VBEXT_CT_MSFORM = 3
-$script:VBEXT_CT_DOCUMENT = 100
 
 function Write-Status {
     Param(
         [Parameter(Mandatory = $true)][string]$Message,
         [ConsoleColor]$Color = [ConsoleColor]::Gray
     )
-    Write-Host $Message -ForegroundColor $Color
-}
-
-function Get-AccessDocumentNameCandidates {
-    [CmdletBinding()]
-    Param(
-        [Parameter(Mandatory = $true)][string]$ModuleName,
-        [Parameter(Mandatory = $true)][ValidateSet('Form', 'Report')][string]$Kind
-    )
-
-    $names = [System.Collections.Generic.List[string]]::new()
-    $prefix = if ($Kind -eq 'Form') { 'Form_' } else { 'Report_' }
-
-    foreach ($candidate in @($ModuleName, ($ModuleName -replace '^(Form|Report)_', ''))) {
-        if (-not [string]::IsNullOrWhiteSpace($candidate) -and -not $names.Contains($candidate)) {
-            $names.Add($candidate)
-        }
+    $old = $Host.UI.RawUI.ForegroundColor
+    try {
+        $Host.UI.RawUI.ForegroundColor = $Color
+        Write-Host $Message
+    } finally {
+        $Host.UI.RawUI.ForegroundColor = $old
     }
-
-    if ($ModuleName -notmatch '^(Form|Report)_') {
-        $prefixed = $prefix + $ModuleName
-        if (-not $names.Contains($prefixed)) {
-            $names.Add($prefixed)
-        }
-    }
-
-    return @($names)
-}
-
-function Resolve-AccessDocumentInfo {
-    [CmdletBinding()]
-    Param(
-        [string]$ModuleName,
-        $AccessApplication = $null
-    )
-
-    if ([string]::IsNullOrWhiteSpace($ModuleName)) { return $null }
-
-    $kindCandidates = [System.Collections.Generic.List[object]]::new()
-    if ($ModuleName -match '^Report_') {
-        $kindCandidates.Add([pscustomobject]@{ Kind = 'Report'; AcObjectType = $script:AC_REPORT; Folder = 'reports'; TextExtension = '.report.txt'; BeginMarker = 'Begin Report' })
-    }
-    if ($ModuleName -match '^Form_') {
-        $kindCandidates.Add([pscustomobject]@{ Kind = 'Form'; AcObjectType = $script:AC_FORM; Folder = 'forms'; TextExtension = '.form.txt'; BeginMarker = 'Begin Form' })
-    }
-    if ($kindCandidates.Count -eq 0) {
-        $kindCandidates.Add([pscustomobject]@{ Kind = 'Form'; AcObjectType = $script:AC_FORM; Folder = 'forms'; TextExtension = '.form.txt'; BeginMarker = 'Begin Form' })
-        $kindCandidates.Add([pscustomobject]@{ Kind = 'Report'; AcObjectType = $script:AC_REPORT; Folder = 'reports'; TextExtension = '.report.txt'; BeginMarker = 'Begin Report' })
-    }
-
-    if ($AccessApplication) {
-        try {
-            $project = $AccessApplication.CurrentProject
-            foreach ($kindCandidate in $kindCandidates) {
-                $nameVariants = @(Get-AccessDocumentNameCandidates -ModuleName $ModuleName -Kind $kindCandidate.Kind)
-                $collection = if ($kindCandidate.Kind -eq 'Form') { $project.AllForms } else { $project.AllReports }
-                $matchedName = $null
-
-                try {
-                    foreach ($member in $collection) {
-                        try {
-                            $memberName = [string]$member.Name
-                            if ([string]::IsNullOrWhiteSpace($memberName)) { continue }
-
-                            foreach ($candidateName in $nameVariants) {
-                                if ([string]::Equals($memberName, $candidateName, [System.StringComparison]::OrdinalIgnoreCase)) {
-                                    $matchedName = $memberName
-                                    break
-                                }
-                            }
-
-                            if ($matchedName) { break }
-                        } finally {
-                            if ($member) {
-                                try { [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($member) | Out-Null } catch {}
-                            }
-                        }
-                    }
-                } catch {}
-
-                if ($matchedName) {
-                    return [pscustomobject]@{
-                        Kind = $kindCandidate.Kind
-                        AccessObjectName = $matchedName
-                        AcObjectType = $kindCandidate.AcObjectType
-                        Folder = $kindCandidate.Folder
-                        TextExtension = $kindCandidate.TextExtension
-                        BeginMarker = $kindCandidate.BeginMarker
-                    }
-                }
-            }
-        } catch {}
-    }
-
-    foreach ($kindCandidate in $kindCandidates) {
-        $nameVariants = @(Get-AccessDocumentNameCandidates -ModuleName $ModuleName -Kind $kindCandidate.Kind)
-        foreach ($candidateName in $nameVariants) {
-            if (-not [string]::IsNullOrWhiteSpace($candidateName)) {
-                return [pscustomobject]@{
-                    Kind = $kindCandidate.Kind
-                    AccessObjectName = $candidateName
-                    AcObjectType = $kindCandidate.AcObjectType
-                    Folder = $kindCandidate.Folder
-                    TextExtension = $kindCandidate.TextExtension
-                    BeginMarker = $kindCandidate.BeginMarker
-                }
-            }
-        }
-    }
-
-    return $null
 }
 
 function New-DaoDbEngine {
@@ -198,38 +77,6 @@ function New-DaoDbEngine {
     return $null
 }
 
-function Invoke-WithDaoDatabase {
-    # Abre una BD via DAO, ejecuta el scriptblock, y limpia COM/GC.
-    # El scriptblock recibe $db como argumento.
-    # Devuelve lo que devuelva el scriptblock, o $DefaultOnError si falla.
-    [CmdletBinding()]
-    Param(
-        [Parameter(Mandatory = $true)][string]$AccessPath,
-        [string]$Password,
-        [Parameter(Mandatory = $true)][scriptblock]$Action,
-        $DefaultOnError = $null
-    )
-
-    $dbEngine = $null
-    $db = $null
-    try {
-        $dbEngine = New-DaoDbEngine
-        if (-not $dbEngine) { return $DefaultOnError }
-        $connect = if ($Password) { ";PWD=$Password" } else { "" }
-        try { $db = $dbEngine.OpenDatabase($AccessPath, $false, $false, $connect) } catch { return $DefaultOnError }
-        return (& $Action $db)
-    } catch {
-        return $DefaultOnError
-    } finally {
-        if ($db) { try { $db.Close() } catch {} }
-        foreach ($obj in @($db, $dbEngine)) {
-            if ($obj) { try { [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($obj) | Out-Null } catch {} }
-        }
-        [System.GC]::Collect()
-        [System.GC]::WaitForPendingFinalizers()
-    }
-}
-
 function Get-AllowBypassKeyState {
     [CmdletBinding()]
     Param(
@@ -237,14 +84,39 @@ function Get-AllowBypassKeyState {
         [Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSAvoidUsingPlainTextForPassword", "", Justification = "Requerido por especificacion del proyecto.")]
         [string]$Password
     )
-    Invoke-WithDaoDatabase -AccessPath $AccessPath -Password $Password -Action {
-        param($db)
+
+    $dbEngine = $null
+    $database = $null
+    $prop = $null
+
+    try {
+        $dbEngine = New-DaoDbEngine
+        if (-not $dbEngine) { return $null }
+
+        $connect = ""
+        if (-not [string]::IsNullOrEmpty($Password)) {
+            $connect = ";PWD=$Password"
+        }
+
         try {
-            $prop = $db.Properties("AllowBypassKey")
+            $database = $dbEngine.OpenDatabase($AccessPath, $false, $false, $connect)
+        } catch {
+            return $null
+        }
+
+        try {
+            $prop = $database.Properties("AllowBypassKey")
             return [pscustomobject]@{ Existed = $true; Value = [bool]$prop.Value }
         } catch {
             return [pscustomobject]@{ Existed = $false; Value = $null }
         }
+    } finally {
+        if ($database) { try { $database.Close() } catch {} }
+        foreach ($obj in @($prop, $database, $dbEngine)) {
+            if ($obj) { try { [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($obj) | Out-Null } catch {} }
+        }
+        [System.GC]::Collect()
+        [System.GC]::WaitForPendingFinalizers()
     }
 }
 
@@ -255,18 +127,44 @@ function Enable-AllowBypassKey {
         [Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSAvoidUsingPlainTextForPassword", "", Justification = "Requerido por especificacion del proyecto.")]
         [string]$Password
     )
-    $result = Invoke-WithDaoDatabase -AccessPath $AccessPath -Password $Password -DefaultOnError $false -Action {
-        param($db)
+
+    $dbEngine = $null
+    $database = $null
+    $prop = $null
+    $newProp = $null
+
+    try {
+        $dbEngine = New-DaoDbEngine
+        if (-not $dbEngine) { return $false }
+
+        $connect = ""
+        if (-not [string]::IsNullOrEmpty($Password)) {
+            $connect = ";PWD=$Password"
+        }
+
         try {
-            $prop = $db.Properties("AllowBypassKey")
+            $database = $dbEngine.OpenDatabase($AccessPath, $false, $false, $connect)
+        } catch {
+            return $false
+        }
+
+        try {
+            $prop = $database.Properties("AllowBypassKey")
             $prop.Value = $true
         } catch {
-            $newProp = $db.CreateProperty("AllowBypassKey", 1, $true)
-            $db.Properties.Append($newProp)
+            # 1 = dbBoolean, sin cast [int16] para evitar problemas COM
+            $newProp = $database.CreateProperty("AllowBypassKey", 1, $true)
+            $database.Properties.Append($newProp)
         }
         return $true
+    } finally {
+        if ($database) { try { $database.Close() } catch {} }
+        foreach ($obj in @($newProp, $prop, $database, $dbEngine)) {
+            if ($obj) { try { [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($obj) | Out-Null } catch {} }
+        }
+        [System.GC]::Collect()
+        [System.GC]::WaitForPendingFinalizers()
     }
-    return $result
 }
 
 function Restore-AllowBypassKey {
@@ -277,16 +175,42 @@ function Restore-AllowBypassKey {
         [string]$Password,
         $OriginalState
     )
+
     if (-not $OriginalState) { return }
-    Invoke-WithDaoDatabase -AccessPath $AccessPath -Password $Password -Action {
-        param($db)
+
+    $dbEngine = $null
+    $database = $null
+    $prop = $null
+
+    try {
+        $dbEngine = New-DaoDbEngine
+        if (-not $dbEngine) { return }
+
+        $connect = ""
+        if (-not [string]::IsNullOrEmpty($Password)) {
+            $connect = ";PWD=$Password"
+        }
+
+        try {
+            $database = $dbEngine.OpenDatabase($AccessPath, $false, $false, $connect)
+        } catch {
+            return
+        }
+
         if ($OriginalState.Existed) {
-            $prop = $db.Properties("AllowBypassKey")
+            $prop = $database.Properties("AllowBypassKey")
             $prop.Value = [bool]$OriginalState.Value
         } else {
-            try { $db.Properties.Delete("AllowBypassKey") } catch {}
+            try { $database.Properties.Delete("AllowBypassKey") } catch {}
         }
-    } | Out-Null
+    } finally {
+        if ($database) { try { $database.Close() } catch {} }
+        foreach ($obj in @($prop, $database, $dbEngine)) {
+            if ($obj) { try { [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($obj) | Out-Null } catch {} }
+        }
+        [System.GC]::Collect()
+        [System.GC]::WaitForPendingFinalizers()
+    }
 }
 
 function Disable-StartupFeatures {
@@ -295,13 +219,21 @@ function Disable-StartupFeatures {
         [Parameter(Mandatory = $true)][string]$AccessPath,
         [string]$Password
     )
-    Invoke-WithDaoDatabase -AccessPath $AccessPath -Password $Password -Action {
-        param($db)
-        $restoreInfo = [ordered]@{
-            RenamedAutoExec     = $false
-            OriginalStartupForm = $null
-            HasStartupForm      = $false
-        }
+
+    $dbEngine = New-DaoDbEngine
+    if (-not $dbEngine) { return $null }
+
+    $db = $null
+    $restoreInfo = [ordered]@{
+        RenamedAutoExec     = $false
+        OriginalStartupForm = $null
+        HasStartupForm      = $false
+    }
+
+    try {
+        $connect = if ($Password) { ";PWD=$Password" } else { "" }
+        $db = $dbEngine.OpenDatabase($AccessPath, $false, $false, $connect)
+
         try {
             $scripts = $db.Containers("Scripts")
             foreach ($doc in $scripts.Documents) {
@@ -311,6 +243,7 @@ function Disable-StartupFeatures {
                     if (-not $autoExecExists) { $doc.Name = "AutoExec" }
                 }
             }
+
             foreach ($doc in $scripts.Documents) {
                 if ($doc.Name -eq "AutoExec") {
                     $doc.Name = "AutoExec_TraeBackup"
@@ -319,13 +252,24 @@ function Disable-StartupFeatures {
                 }
             }
         } catch {}
+
         try {
             $prop = $db.Properties("StartupForm")
             $restoreInfo.OriginalStartupForm = $prop.Value
             $restoreInfo.HasStartupForm = $true
             $db.Properties.Delete("StartupForm")
         } catch {}
+
         return [pscustomobject]$restoreInfo
+
+    } catch {
+        return $null
+    } finally {
+        if ($db) { $db.Close(); [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($db) | Out-Null }
+        # FIX: liberar $dbEngine que antes quedaba vivo
+        if ($dbEngine) { [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($dbEngine) | Out-Null }
+        [System.GC]::Collect()
+        [System.GC]::WaitForPendingFinalizers()
     }
 }
 
@@ -336,9 +280,16 @@ function Restore-StartupFeatures {
         [string]$Password,
         $RestoreInfo
     )
+
     if (-not $RestoreInfo) { return }
-    Invoke-WithDaoDatabase -AccessPath $AccessPath -Password $Password -Action {
-        param($db)
+
+    $dbEngine = New-DaoDbEngine
+    $db = $null
+
+    try {
+        $connect = if ($Password) { ";PWD=$Password" } else { "" }
+        $db = $dbEngine.OpenDatabase($AccessPath, $false, $false, $connect)
+
         if ($RestoreInfo.RenamedAutoExec) {
             try {
                 $scripts = $db.Containers("Scripts")
@@ -350,13 +301,19 @@ function Restore-StartupFeatures {
                 }
             } catch {}
         }
+
         if ($RestoreInfo.HasStartupForm) {
             try {
+                # 10 = dbText, sin cast [int16] para evitar problemas COM
                 $newProp = $db.CreateProperty("StartupForm", 10, $RestoreInfo.OriginalStartupForm)
                 $db.Properties.Append($newProp)
             } catch {}
         }
-    } | Out-Null
+    } catch {
+    } finally {
+        if ($db) { $db.Close(); [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($db) | Out-Null }
+        if ($dbEngine) { [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($dbEngine) | Out-Null }
+    }
 }
 
 function Resolve-AccessPath {
@@ -406,7 +363,8 @@ function Resolve-ModulesPath {
     [CmdletBinding()]
     Param(
         [Parameter(Mandatory = $true)][string]$DestinationRoot,
-        [Parameter(Mandatory = $true)][ValidateSet("Export", "Import", "Fix-Encoding", "Generate-ERD", "Sandbox", "List-Objects")][string]$Action
+        [Parameter(Mandatory = $true)][string]$AccessPath,
+        [Parameter(Mandatory = $true)][ValidateSet("Export", "Import", "Fix-Encoding", "Generate-ERD")][string]$Action
     )
     if (-not (Test-Path -Path $DestinationRoot)) {
         if ($Action -eq "Export" -or $Action -eq "Fix-Encoding") {
@@ -450,7 +408,7 @@ function Convert-AnsiToUtf8NoBom {
         [Parameter(Mandatory = $true)][string]$OutputPath
     )
 
-    $ansi = [System.Text.Encoding]::GetEncoding($script:AnsiCodePage)
+    $ansi = [System.Text.Encoding]::GetEncoding(1252)
     $text = [System.IO.File]::ReadAllText($InputPath, $ansi)
     Write-Utf8NoBom -Path $OutputPath -Text $text
 }
@@ -463,47 +421,9 @@ function Convert-Utf8ToAnsiTempFile {
     )
 
     $utf8 = [System.Text.Encoding]::UTF8
-    $ansi = [System.Text.Encoding]::GetEncoding($script:AnsiCodePage)
+    $ansi = [System.Text.Encoding]::GetEncoding(1252)
     $text = [System.IO.File]::ReadAllText($InputPath, $utf8)
     [System.IO.File]::WriteAllText($TempPath, $text, $ansi)
-}
-
-function Strip-VbaMetadataHeader {
-    # Elimina del archivo las lineas de metadatos VBE que preceden al codigo real:
-    #   VERSION 1.0 CLASS, bloque BEGIN/END, Attribute VB_*
-    # Necesario antes de AddFromFile, que no parsea metadatos y los inyecta como codigo.
-    [CmdletBinding()]
-    Param(
-        [Parameter(Mandatory = $true)][string]$FilePath
-    )
-
-    $ansi = [System.Text.Encoding]::GetEncoding($script:AnsiCodePage)
-    $lines = [System.IO.File]::ReadAllLines($FilePath, $ansi)
-    $startIdx = 0
-    $inBeginBlock = $false
-    $foundMeta = $false
-
-    for ($i = 0; $i -lt $lines.Count; $i++) {
-        $line = $lines[$i].TrimStart()
-
-        if ($inBeginBlock) {
-            if ($line -eq 'END') { $inBeginBlock = $false }
-            continue
-        }
-
-        if ($line -match '^VERSION\s+') { $foundMeta = $true; continue }
-        if ($line -eq 'BEGIN') { $foundMeta = $true; $inBeginBlock = $true; continue }
-        if ($line -match '^Attribute\s+VB_') { $foundMeta = $true; continue }
-        if ($foundMeta -and $line -eq '') { continue }  # solo saltar vacias entre metadatos
-
-        $startIdx = $i
-        break
-    }
-
-    if ($startIdx -gt 0) {
-        $codeLines = $lines[$startIdx..($lines.Count - 1)]
-        [System.IO.File]::WriteAllLines($FilePath, $codeLines, $ansi)
-    }
 }
 
 function Get-ProcessIdFromHwnd {
@@ -513,21 +433,19 @@ function Get-ProcessIdFromHwnd {
     )
 
     if (-not ([System.Management.Automation.PSTypeName]"Win32.NativeMethods").Type) {
-        Add-Type -TypeDefinition @"
+        Add-Type -Namespace Win32 -Name NativeMethods -MemberDefinition @"
 using System;
 using System.Runtime.InteropServices;
-namespace Win32 {
-  public static class NativeMethods {
-    [DllImport("user32.dll")]
-    public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
-  }
+public static class NativeMethods {
+  [DllImport("user32.dll")]
+  public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
 }
 "@
     }
 
-    [uint32]$processIdNative = 0
-    [Win32.NativeMethods]::GetWindowThreadProcessId($Hwnd, [ref]$processIdNative) | Out-Null
-    return [int]$processIdNative
+    [uint32]$pid = 0
+    [Win32.NativeMethods]::GetWindowThreadProcessId($Hwnd, [ref]$pid) | Out-Null
+    return [int]$pid
 }
 
 function Close-TargetAccessDbIfOpen {
@@ -668,13 +586,14 @@ public class RotManager {
         if (Test-Path -LiteralPath $laccdb) {
             Write-Status -Message ("Detectado lock activo: {0}" -f $laccdb) -Color Yellow
 
-            # Buscar MSACCESS.EXE por CommandLine usando la ruta completa resuelta.
+            # Buscar MSACCESS.EXE por CommandLine (contiene la ruta del .accdb que abrio)
+            $dbFileName = [System.IO.Path]::GetFileName($resolved)
             $cimProcs = @(Get-CimInstance Win32_Process -Filter "Name = 'MSACCESS.EXE'" -ErrorAction SilentlyContinue)
             $killed = $false
 
             foreach ($cim in $cimProcs) {
-                if ($cim.CommandLine -and $cim.CommandLine -match [regex]::Escape($resolved)) {
-                    Write-Status -Message ("Cerrando MSACCESS PID {0} (CommandLine contiene la ruta completa)" -f $cim.ProcessId) -Color Yellow
+                if ($cim.CommandLine -and $cim.CommandLine -match [regex]::Escape($dbFileName)) {
+                    Write-Status -Message ("Cerrando MSACCESS PID {0} (CommandLine contiene: {1})" -f $cim.ProcessId, $dbFileName) -Color Yellow
                     try {
                         Stop-Process -Id $cim.ProcessId -Force -ErrorAction Stop
                         $killed = $true
@@ -685,7 +604,7 @@ public class RotManager {
             }
 
             if (-not $killed -and $cimProcs.Count -gt 0) {
-                Write-Status -Message ("Ningun MSACCESS contiene la ruta completa '{0}' en CommandLine. PIDs activos: {1}" -f $resolved, (($cimProcs | ForEach-Object { $_.ProcessId }) -join ', ')) -Color DarkYellow
+                Write-Status -Message ("Ningun MSACCESS contiene '{0}' en CommandLine. PIDs activos: {1}" -f $dbFileName, (($cimProcs | ForEach-Object { $_.ProcessId }) -join ', ')) -Color DarkYellow
             }
 
             if ($killed) {
@@ -695,56 +614,13 @@ public class RotManager {
                     $elapsed += 0.5
                 }
                 if (Test-Path -LiteralPath $laccdb) {
-                    # Proceso muerto pero lock persiste — intentar borrar (seguro si el proceso ya no existe)
-                    try {
-                        Remove-Item -LiteralPath $laccdb -Force -ErrorAction Stop
-                        Write-Status -Message "Lock huerfano eliminado." -Color Green
-                    } catch {
-                        Write-Status -Message ("No se pudo eliminar .laccdb huerfano: {0}" -f $_.Exception.Message) -Color Red
-                    }
+                    Write-Status -Message "ADVERTENCIA: .laccdb sigue presente tras cerrar el proceso." -Color DarkYellow
                 } else {
                     Write-Status -Message "Lock liberado correctamente." -Color Green
                 }
             }
         }
     }
-}
-
-function Get-AccessProcessId {
-    # Detecta el PID del proceso MSACCESS asociado a una instancia COM.
-    # Estrategia: hwnd -> GetWindowThreadProcessId. Fallback: diff de procesos pre/post.
-    [CmdletBinding()]
-    Param(
-        [Parameter(Mandatory = $true)]$AccessApp,
-        [int[]]$PrePids = @()
-    )
-
-    # Intento 1: hWndAccessApp
-    try {
-        $hwndValue = $AccessApp.hWndAccessApp
-        if ($hwndValue -is [System.Management.Automation.PSMethod]) {
-            $hwndValue = $hwndValue.Invoke()
-        }
-        $hwnd = [IntPtr]$hwndValue
-        if ($hwnd -and $hwnd -ne [IntPtr]::Zero) {
-            $accessProcId = Get-ProcessIdFromHwnd -Hwnd $hwnd
-            if ($accessProcId -gt 0) { return $accessProcId }
-        }
-    } catch {
-        Write-Status -Message ("WARN: no se pudo resolver PID via hWndAccessApp: {0}" -f $_.Exception.Message) -Color DarkYellow
-    }
-
-    # Intento 2: diff de procesos MSACCESS
-    try {
-        $post = @(Get-Process MSACCESS -ErrorAction SilentlyContinue | Select-Object -Property Id, StartTime)
-        $new = @($post | Where-Object { $_.Id -notin $PrePids })
-        if ($new.Count -ge 1) {
-            $picked = $new | Sort-Object -Property StartTime -Descending | Select-Object -First 1
-            return [int]$picked.Id
-        }
-    } catch {}
-
-    return $null
 }
 
 function Open-AccessDatabase {
@@ -762,7 +638,6 @@ function Open-AccessDatabase {
     $vbProject = $null
     $prePids = @()
     $startupInfo = $null
-    $originalAutomationSecurity = $null
 
     try {
         # Cerrar SOLO la instancia COM que tenga esta BD abierta, sin tocar otras instancias de Access
@@ -788,15 +663,33 @@ function Open-AccessDatabase {
         $access = New-Object -ComObject Access.Application
         $access.Visible = $false
         $access.UserControl = $false
-        $originalAutomationSecurity = $access.AutomationSecurity
-        $access.AutomationSecurity = $script:MSO_AUTOMATION_SECURITY_LOW
+        $access.AutomationSecurity = 1
+        try {
+            $hwnd = [IntPtr]$access.hWndAccessApp
+            if ($hwnd -and $hwnd -ne [IntPtr]::Zero) {
+                $accessPid = Get-ProcessIdFromHwnd -Hwnd $hwnd
+            }
+        } catch {}
 
         $access.OpenCurrentDatabase($AccessPath, $false, $Password)
-        try { $access.DoCmd.SetWarnings($false) } catch {
-            Write-Status -Message ("WARN: no se pudo desactivar SetWarnings: {0}" -f $_.Exception.Message) -Color DarkYellow
-        }
+        try { $access.DoCmd.SetWarnings($false) } catch {}
+        try {
+            if (-not $accessPid) {
+                $hwnd2 = [IntPtr]$access.hWndAccessApp
+                if ($hwnd2 -and $hwnd2 -ne [IntPtr]::Zero) {
+                    $accessPid = Get-ProcessIdFromHwnd -Hwnd $hwnd2
+                }
+            }
+        } catch {}
 
-        $accessPid = Get-AccessProcessId -AccessApp $access -PrePids $prePids
+        try {
+            $post = @(Get-Process MSACCESS -ErrorAction SilentlyContinue | Select-Object -Property Id, StartTime)
+            $new = @($post | Where-Object { $_.Id -notin $prePids })
+            if ($new.Count -ge 1) {
+                $picked = $new | Sort-Object -Property StartTime -Descending | Select-Object -First 1
+                $accessPid = [int]$picked.Id
+            }
+        } catch {}
 
         $vbe = $access.VBE
         $vbProject = $vbe.ActiveVBProject
@@ -807,13 +700,9 @@ function Open-AccessDatabase {
             VbProject         = $vbProject
             OriginalBypass    = $originalBypass
             StartupInfo       = $startupInfo
-            OriginalAutomationSecurity = $originalAutomationSecurity
             ProcessId         = $accessPid
         }
     } catch {
-        if ($access -and $null -ne $originalAutomationSecurity) {
-            try { $access.AutomationSecurity = $originalAutomationSecurity } catch {}
-        }
         if ($access) {
             try { $access.Quit() } catch {}
             try { [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($access) | Out-Null } catch {}
@@ -822,14 +711,10 @@ function Open-AccessDatabase {
             if ($obj) { try { [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($obj) | Out-Null } catch {} }
         }
         if ($originalBypass) {
-            try { Restore-AllowBypassKey -AccessPath $AccessPath -Password $Password -OriginalState $originalBypass } catch {
-                Write-Status -Message ("ERROR restaurando AllowBypassKey durante apertura fallida: {0}" -f $_.Exception.Message) -Color Red
-            }
+            try { Restore-AllowBypassKey -AccessPath $AccessPath -Password $Password -OriginalState $originalBypass } catch {}
         }
         if ($startupInfo) {
-            try { Restore-StartupFeatures -AccessPath $AccessPath -Password $Password -RestoreInfo $startupInfo } catch {
-                Write-Status -Message ("ERROR restaurando StartupForm/AutoExec durante apertura fallida: {0}" -f $_.Exception.Message) -Color Red
-            }
+            try { Restore-StartupFeatures -AccessPath $AccessPath -Password $Password -RestoreInfo $startupInfo } catch {}
         }
         throw
     }
@@ -847,15 +732,9 @@ function Close-AccessDatabase {
     $access = $Session.AccessApplication
     $orig = $Session.OriginalBypass
     $startupInfo = $Session.StartupInfo
-    $originalAutomationSecurity = $Session.OriginalAutomationSecurity
     $accessPid = $Session.ProcessId
 
     if ($access) {
-        if ($null -ne $originalAutomationSecurity) {
-            try { $access.AutomationSecurity = $originalAutomationSecurity } catch {
-                Write-Status -Message ("WARN: no se pudo restaurar AutomationSecurity: {0}" -f $_.Exception.Message) -Color DarkYellow
-            }
-        }
         try { $access.CloseCurrentDatabase() } catch {}
         try { $access.Quit() } catch {}
     }
@@ -864,12 +743,8 @@ function Close-AccessDatabase {
         if ($obj) { try { [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($obj) | Out-Null } catch {} }
     }
 
-    try { Restore-AllowBypassKey -AccessPath $AccessPath -Password $Password -OriginalState $orig } catch {
-        Write-Status -Message ("ERROR restaurando AllowBypassKey al cerrar: {0}" -f $_.Exception.Message) -Color Red
-    }
-    try { Restore-StartupFeatures -AccessPath $AccessPath -Password $Password -RestoreInfo $startupInfo } catch {
-        Write-Status -Message ("ERROR restaurando StartupForm/AutoExec al cerrar: {0}" -f $_.Exception.Message) -Color Red
-    }
+    try { Restore-AllowBypassKey -AccessPath $AccessPath -Password $Password -OriginalState $orig } catch {}
+    try { Restore-StartupFeatures -AccessPath $AccessPath -Password $Password -RestoreInfo $startupInfo } catch {}
 
     [System.GC]::Collect()
     [System.GC]::WaitForPendingFinalizers()
@@ -880,226 +755,27 @@ function Close-AccessDatabase {
 }
 
 function Get-ComponentFolder {
-    Param([Parameter(Mandatory = $true)]$Component, [string]$ModuleName, $AccessApplication = $null)
+    Param([Parameter(Mandatory = $true)]$Component, [string]$ModuleName)
     $name = if ($ModuleName) { $ModuleName } else { $Component.Name }
-    $t = [int]$Component.Type
-    if ($t -eq $script:VBEXT_CT_STDMODULE) { return "modules" }
-    if ($t -eq $script:VBEXT_CT_CLASSMODULE) { return "classes" }
-    if ($t -eq $script:VBEXT_CT_DOCUMENT -or $t -eq $script:VBEXT_CT_MSFORM) {
-        $docInfo = Resolve-AccessDocumentInfo -ModuleName $name -AccessApplication $AccessApplication
-        if ($docInfo) { return $docInfo.Folder }
-        return "forms"
-    }
+    if ($name -match "^Form_|^frm") { return "forms" }
+    $t = $Component.Type
+    if ($t -eq 1) { return "modules" }
+    if ($t -eq 2) { return "classes" }
+    if ($t -eq 100) { return "forms" }  # FIX: vbext_ct_Document es formulario, no clase
+    if ($t -eq 3) { return "forms" }
     return $null
-}
-
-function Get-PreferredNewLine {
-    [CmdletBinding()]
-    Param(
-        [string]$Text
-    )
-
-    if ($Text -match "`r`n") { return "`r`n" }
-    return "`n"
-}
-
-function Normalize-NewLines {
-    [CmdletBinding()]
-    Param(
-        [string]$Text,
-        [string]$NewLine
-    )
-
-    if ($null -eq $Text) { return "" }
-    return ($Text -replace "`r`n|`n|`r", $NewLine)
-}
-
-function Split-CodeBehindSection {
-    [CmdletBinding()]
-    Param(
-        [Parameter(Mandatory = $true)][string]$Text
-    )
-
-    $match = [regex]::Match($Text, "(?ms)^(?<Prefix>.*?)(^(?<Marker>CodeBehind[^\r\n]*)\r?\n)(?<Body>.*)$")
-    if (-not $match.Success) {
-        throw "No se encontro una seccion CodeBehind valida en el documento exportado."
-    }
-
-    return [pscustomobject]@{
-        Prefix = $match.Groups["Prefix"].Value
-        Marker = $match.Groups["Marker"].Value
-        Body   = $match.Groups["Body"].Value
-    }
-}
-
-function Split-VbaMetadataHeaderText {
-    [CmdletBinding()]
-    Param(
-        [Parameter(Mandatory = $true)][string]$Text,
-        [Parameter(Mandatory = $true)][string]$NewLine
-    )
-
-    $normalized = Normalize-NewLines -Text $Text -NewLine $NewLine
-    $lines = [regex]::Split($normalized, [regex]::Escape($NewLine))
-
-    $startIdx = 0
-    $inBeginBlock = $false
-    $foundMeta = $false
-
-    for ($i = 0; $i -lt $lines.Length; $i++) {
-        $line = $lines[$i].TrimStart()
-
-        if ($inBeginBlock) {
-            if ($line -eq "END") { $inBeginBlock = $false }
-            continue
-        }
-
-        if ($line -match "^VERSION\s+") { $foundMeta = $true; continue }
-        if ($line -eq "BEGIN") { $foundMeta = $true; $inBeginBlock = $true; continue }
-        if ($line -match "^Attribute\s+VB_") { $foundMeta = $true; continue }
-        if ($foundMeta -and $line -eq "") { continue }
-
-        $startIdx = $i
-        break
-    }
-
-    if ($lines.Length -eq 0) {
-        return [pscustomobject]@{ Header = ""; Body = "" }
-    }
-
-    if ($startIdx -eq 0 -and $foundMeta) {
-        $startIdx = $lines.Length
-    }
-
-    $header = if ($startIdx -gt 0) { [string]::Join($NewLine, $lines[0..($startIdx - 1)]) } else { "" }
-    $body = if ($startIdx -lt $lines.Length) { [string]::Join($NewLine, $lines[$startIdx..($lines.Length - 1)]) } else { "" }
-
-    return [pscustomobject]@{
-        Header = $header
-        Body   = $body
-    }
-}
-
-function Join-CodeBehindBodyText {
-    [CmdletBinding()]
-    Param(
-        [string]$Header,
-        [string]$Body,
-        [Parameter(Mandatory = $true)][string]$NewLine
-    )
-
-    $parts = [System.Collections.Generic.List[string]]::new()
-    if (-not [string]::IsNullOrWhiteSpace($Header)) {
-        $parts.Add((Normalize-NewLines -Text $Header -NewLine $NewLine).TrimEnd("`r", "`n"))
-    }
-    if (-not [string]::IsNullOrWhiteSpace($Body)) {
-        $parts.Add((Normalize-NewLines -Text $Body -NewLine $NewLine).TrimEnd("`r", "`n"))
-    }
-    if ($parts.Count -eq 0) { return "" }
-    return [string]::Join($NewLine, $parts)
-}
-
-function Merge-DocumentCodeBehindFromCls {
-    [CmdletBinding()]
-    Param(
-        [Parameter(Mandatory = $true)][string]$DocumentTextPath,
-        [Parameter(Mandatory = $true)][string]$ClsSourcePath
-    )
-
-    $ansi = [System.Text.Encoding]::GetEncoding($script:AnsiCodePage)
-    $docText = [System.IO.File]::ReadAllText($DocumentTextPath, $ansi)
-    $clsText = [System.IO.File]::ReadAllText($ClsSourcePath, [System.Text.Encoding]::UTF8)
-
-    $newLine = Get-PreferredNewLine -Text $docText
-    $docSection = Split-CodeBehindSection -Text $docText
-    $docParsed = Split-VbaMetadataHeaderText -Text $docSection.Body -NewLine $newLine
-    $clsParsed = Split-VbaMetadataHeaderText -Text $clsText -NewLine $newLine
-
-    $headerToKeep = if (-not [string]::IsNullOrWhiteSpace($docParsed.Header)) { $docParsed.Header } else { $clsParsed.Header }
-    $marker = if ([string]::IsNullOrWhiteSpace($docSection.Marker)) { "CodeBehind" } else { $docSection.Marker }
-    $rebuiltBody = Join-CodeBehindBodyText -Header $headerToKeep -Body $clsParsed.Body -NewLine $newLine
-    $mergedText = (Normalize-NewLines -Text $docSection.Prefix -NewLine $newLine) + $marker + $newLine + $rebuiltBody
-
-    [System.IO.File]::WriteAllText($DocumentTextPath, $mergedText, $ansi)
 }
 
 function Get-ComponentExtension {
-    Param([Parameter(Mandatory = $true)]$Component, [string]$ModuleName, $AccessApplication = $null)
+    Param([Parameter(Mandatory = $true)]$Component, [string]$ModuleName)
     $name = if ($ModuleName) { $ModuleName } else { $Component.Name }
-    $t = [int]$Component.Type
-    if ($t -eq $script:VBEXT_CT_STDMODULE) { return ".bas" }
-    if ($t -eq $script:VBEXT_CT_CLASSMODULE) { return ".cls" }
-    if ($t -eq $script:VBEXT_CT_DOCUMENT -or $t -eq $script:VBEXT_CT_MSFORM) {
-        $docInfo = Resolve-AccessDocumentInfo -ModuleName $name -AccessApplication $AccessApplication
-        if ($docInfo) { return $docInfo.TextExtension }
-        return ".form.txt"
-    }
+    if ($name -match "^Form_|^frm") { return ".form.txt" }
+    $t = $Component.Type
+    if ($t -eq 1) { return ".bas" }
+    if ($t -eq 2) { return ".cls" }
+    if ($t -eq 100) { return ".form.txt" }
+    if ($t -eq 3) { return ".form.txt" }
     return $null
-}
-
-function Get-VbComponentNames {
-    # Enumera nombres de componentes VBA exportables (BAS, CLS, Form).
-    # Libera cada COM reference tras leer el nombre.
-    [CmdletBinding()]
-    Param(
-        [Parameter(Mandatory = $true)]$VbProject
-    )
-    $components = $VbProject.VBComponents
-    $names = @()
-    try {
-        for ($i = 1; $i -le $components.Count; $i++) {
-            $c = $components.Item($i)
-            try {
-                $ext = Get-ComponentExtension -Component $c -ModuleName $c.Name
-                if ($ext) { $names += $c.Name }
-            } finally {
-                try { [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($c) | Out-Null } catch {}
-            }
-        }
-    } finally {
-        try { [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($components) | Out-Null } catch {}
-    }
-    return ($names | Sort-Object -Unique)
-}
-
-function Resolve-VbComponentName {
-    # Resuelve el nombre de un componente en el VBProject.
-    # Access internamente prefija los code-behind de formularios con "Form_",
-    # pero los usuarios usan el nombre del formulario sin prefijo.
-    # Intenta: $Name tal cual -> "Form_$Name"
-    [CmdletBinding()]
-    Param(
-        [Parameter(Mandatory = $true)]$VbProject,
-        [Parameter(Mandatory = $true)][string]$Name
-    )
-
-    try {
-        $c = $VbProject.VBComponents.Item($Name)
-        if ($c) {
-            try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($c) | Out-Null } catch {}
-            return $Name
-        }
-    } catch {}
-
-    $altName = "Form_" + $Name
-    try {
-        $c = $VbProject.VBComponents.Item($altName)
-        if ($c) {
-            try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($c) | Out-Null } catch {}
-            return $altName
-        }
-    } catch {}
-
-    $altName = "Report_" + $Name
-    try {
-        $c = $VbProject.VBComponents.Item($altName)
-        if ($c) {
-            try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($c) | Out-Null } catch {}
-            return $altName
-        }
-    } catch {}
-
-    return $Name  # devolver el original — el caller decidira si lanzar error
 }
 
 function Export-VbaModule {
@@ -1116,12 +792,11 @@ function Export-VbaModule {
     $finalPath = $null
 
     try {
-        $ModuleName = Resolve-VbComponentName -VbProject $VbProject -Name $ModuleName
         $component = $VbProject.VBComponents.Item($ModuleName)
         $type = [int]$component.Type
         if ($type -ne 1 -and $type -ne 2 -and $type -ne 100 -and $type -ne 3) { return }
-        $ext = Get-ComponentExtension -Component $component -ModuleName $ModuleName -AccessApplication $AccessApplication
-        $folder = Get-ComponentFolder -Component $component -ModuleName $ModuleName -AccessApplication $AccessApplication
+        $ext = Get-ComponentExtension -Component $component -ModuleName $ModuleName
+        $folder = Get-ComponentFolder -Component $component -ModuleName $ModuleName
         if (-not $ext -or -not $folder) { return }
 
         $targetFolder = Join-Path -Path $ModulesPath -ChildPath $folder
@@ -1133,22 +808,20 @@ function Export-VbaModule {
 
         # FIX: formularios usan SaveAsText para obtener UI + codigo completo
         # SaveAsText requiere el nombre del objeto Access SIN prefijo "Form_"
-        if ($type -eq $script:VBEXT_CT_MSFORM -or $type -eq $script:VBEXT_CT_DOCUMENT) {
-            $docInfo = Resolve-AccessDocumentInfo -ModuleName $ModuleName -AccessApplication $AccessApplication
-            if (-not $docInfo) {
-                throw ("No se pudo determinar si '{0}' es formulario o reporte." -f $ModuleName)
-            }
+        if ($type -eq 3 -or $type -eq 100) {
+            $formName = $ModuleName -replace '^Form_', ''
             $tmp = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("VBAManager_export_{0}.txt" -f [guid]::NewGuid().ToString("N"))
 
             if (-not $AccessApplication) {
                 # Sin sesion COM no es posible exportar la UI del formulario
-                throw ("Se necesita -AccessApplication para exportar el objeto '{0}' con SaveAsText." -f $docInfo.AccessObjectName)
+                throw ("Se necesita -AccessApplication para exportar el formulario '{0}' con SaveAsText." -f $formName)
             }
 
             try {
-                $AccessApplication.SaveAsText($docInfo.AcObjectType, $docInfo.AccessObjectName, $tmp)
+                # acForm = 2
+                $AccessApplication.SaveAsText(2, $formName, $tmp)
             } catch {
-                throw ("SaveAsText lanzo excepcion para '{0}': {1}" -f $docInfo.AccessObjectName, $_.Exception.Message)
+                throw ("SaveAsText lanzo excepcion para '{0}': {1}" -f $formName, $_.Exception.Message)
             }
 
             # Verificar integridad: SaveAsText puede completarse sin excepcion pero producir un archivo
@@ -1156,13 +829,11 @@ function Export-VbaModule {
             # Un .form.txt valido siempre contiene la linea "Begin Form".
             $savedContent = $null
             if (Test-Path -Path $tmp) {
-                try { $savedContent = Get-Content -Path $tmp -Raw -Encoding Default -ErrorAction Stop } catch {
-                    Write-Status -Message ("WARN: no se pudo leer export temporal de '{0}': {1}" -f $docInfo.AccessObjectName, $_.Exception.Message) -Color DarkYellow
-                }
+                try { $savedContent = Get-Content -Path $tmp -Raw -Encoding Default -ErrorAction Stop } catch {}
             }
-            if (-not $savedContent -or $savedContent -notmatch [regex]::Escape($docInfo.BeginMarker)) {
-                throw ("SaveAsText produjo un archivo incompleto para '{0}' (falta '{1}'). " +
-                       "Asegurate de que el objeto no este abierto en modo diseno en ninguna instancia de Access." -f $docInfo.AccessObjectName, $docInfo.BeginMarker)
+            if (-not $savedContent -or $savedContent -notmatch 'Begin Form') {
+                throw ("SaveAsText produjo un archivo incompleto para '{0}' (falta 'Begin Form'). " +
+                       "Asegurate de que el formulario no este abierto en modo diseno en ninguna instancia de Access." -f $formName)
             }
 
             Convert-AnsiToUtf8NoBom -InputPath $tmp -OutputPath $finalPath
@@ -1173,9 +844,8 @@ function Export-VbaModule {
         }
 
         # Exportar tambien el codigo VBA como .cls para formularios (para diff y lectura rapida)
-        if ($type -eq $script:VBEXT_CT_MSFORM -or $type -eq $script:VBEXT_CT_DOCUMENT) {
-            $docInfo = Resolve-AccessDocumentInfo -ModuleName $ModuleName -AccessApplication $AccessApplication
-            $clsFolder = Join-Path -Path $ModulesPath -ChildPath $(if ($docInfo) { $docInfo.Folder } else { "forms" })
+        if ($ModuleName -match "^Form_|^frm") {
+            $clsFolder = Join-Path -Path $ModulesPath -ChildPath "forms"
             if (-not (Test-Path -Path $clsFolder)) {
                 New-Item -Path $clsFolder -ItemType Directory -Force | Out-Null
             }
@@ -1203,47 +873,28 @@ function Resolve-ImportFileForModule {
     $modulesPathText = [string]$ModulesPath
     $moduleNameText = [string]$ModuleName
 
-    # Nombres candidatos: el original y con prefijo Form_ (los usuarios no ponen Form_)
-    $nameVariants = @($moduleNameText)
-    if ($moduleNameText -notmatch '^Form_') {
-        $nameVariants += ("Form_" + $moduleNameText)
-    }
-    if ($moduleNameText -notmatch '^Report_') {
-        $nameVariants += ("Report_" + $moduleNameText)
-    }
-
-    $subFolders = @("forms", "reports", "classes", "modules", "")
+    $subFolders = @("forms", "classes", "modules", "")
     switch ($ImportMode) {
-        "Form" { $extensions = @(".form.txt", ".report.txt", ".frm") }
+        "Form" { $extensions = @(".form.txt", ".frm") }
         "Code" { $extensions = @(".cls", ".bas") }
-        default { $extensions = @(".form.txt", ".report.txt", ".frm", ".cls", ".bas") }
+        default { $extensions = @(".form.txt", ".frm", ".cls", ".bas") }
     }
 
-    # Extension tiene prioridad sobre carpeta, y nombre original sobre Form_ prefijado.
-    foreach ($ext in $extensions) {
-        foreach ($tryName in $nameVariants) {
-            foreach ($folder in $subFolders) {
-                $searchPath = if ($folder) { Join-Path -Path $modulesPathText -ChildPath $folder } else { $modulesPathText }
-                if (-not (Test-Path -Path $searchPath)) { continue }
+    foreach ($folder in $subFolders) {
+        $searchPath = if ($folder) { Join-Path -Path $modulesPathText -ChildPath $folder } else { $modulesPathText }
+        if (-not (Test-Path -Path $searchPath)) { continue }
 
-                $candidate = Join-Path -Path $searchPath -ChildPath ($tryName + $ext)
-                if (Test-Path -Path $candidate) { return $candidate }
-            }
+        foreach ($ext in $extensions) {
+            $candidate = Join-Path -Path $searchPath -ChildPath ($moduleNameText + $ext)
+            if (Test-Path -Path $candidate) { return $candidate }
         }
     }
 
-    $any = Get-ChildItem -Path $modulesPathText -File -Recurse -Include "*.bas", "*.cls", "*.frm", "*.form.txt", "*.report.txt" -ErrorAction SilentlyContinue |
-        Where-Object {
-            $bn = $_.BaseName
-            $fn = $_.Name -replace '\.(form|report)\.txt$', ''
-            foreach ($tryName in $nameVariants) {
-                if ($bn -ieq $tryName -or $fn -ieq $tryName) { return $true }
-            }
-            return $false
-        } |
+    $any = Get-ChildItem -Path $modulesPathText -File -Recurse -Include "*.bas", "*.cls", "*.frm", "*.form.txt" -ErrorAction SilentlyContinue |
+        Where-Object { $_.BaseName -ieq $moduleNameText -or ($_.Name -replace '\.form\.txt$', '') -ieq $moduleNameText } |
         Where-Object {
             switch ($ImportMode) {
-                "Form" { $_.Name -match '\.(form|report)\.txt$' -or $_.Extension -ieq '.frm' }
+                "Form" { $_.Name -match '\.form\.txt$' -or $_.Extension -ieq '.frm' }
                 "Code" { $_.Extension -ieq '.cls' -or $_.Extension -ieq '.bas' }
                 default { $true }
             }
@@ -1252,13 +903,34 @@ function Resolve-ImportFileForModule {
             if ($ImportMode -eq "Code") {
                 if ($_.Extension -eq '.cls') { 0 } elseif ($_.Extension -eq '.bas') { 1 } else { 9 }
             } else {
-                if ($_.Name -match '\.form\.txt$') { 0 } elseif ($_.Name -match '\.report\.txt$') { 1 } elseif ($_.Extension -eq '.frm') { 2 } elseif ($_.Extension -eq '.cls') { 3 } else { 4 }
+                if ($_.Name -match '\.form\.txt$') { 0 } elseif ($_.Extension -eq '.frm') { 1 } elseif ($_.Extension -eq '.cls') { 2 } else { 3 }
             }
         } } |
         Select-Object -First 1
 
     if ($any) { return $any.FullName }
     return $null
+}
+
+function Remove-ExistingComponent {
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory = $true)]$VbProject,
+        [Parameter(Mandatory = $true)][string]$ModuleName
+    )
+
+    $components = $VbProject.VBComponents
+    for ($i = $components.Count; $i -ge 1; $i--) {
+        $c = $components.Item($i)
+        try {
+            if ($c.Name -ieq $ModuleName) {
+                $components.Remove($c)
+                break
+            }
+        } finally {
+            try { [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($c) | Out-Null } catch {}
+        }
+    }
 }
 
 function Import-VbaModule {
@@ -1274,142 +946,42 @@ function Import-VbaModule {
     $src = Resolve-ImportFileForModule -ModulesPath $ModulesPath -ModuleName $ModuleName -ImportMode $ImportMode
     if (-not $src) { throw ("No se encontro archivo para el modulo '{0}' en {1}" -f $ModuleName, $ModulesPath) }
 
-    $isDocumentText = ($src -match '\.(form|report)\.txt$')
+    $isFormTxt = ($src -match '\.form\.txt$')
     $ext = [System.IO.Path]::GetExtension($src)
     $tmpAnsi = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("VBAManager_import_{0}{1}" -f @([guid]::NewGuid().ToString("N"), $ext))
-    $tmpDocText = $null
     $component = $null
     $codeModule = $null
 
     try {
-        $docInfo = $null
-        if ($AccessApplication) {
-            $docInfo = Resolve-AccessDocumentInfo -ModuleName $ModuleName -AccessApplication $AccessApplication
-        }
-
-        $srcLower = $src.ToLowerInvariant()
-        $isReportDocumentSource = ($ModuleName -match '^Report_') -or ($srcLower -match '[\\/]reports[\\/].+\.cls$') -or ($srcLower -match '\.report\.txt$')
-        $isFormDocumentSource = ($ModuleName -match '^Form_') -or ($srcLower -match '[\\/]forms[\\/].+\.cls$') -or ($srcLower -match '\.form\.txt$')
-
-        if ((-not $docInfo) -and $isReportDocumentSource) {
-            $docInfo = [pscustomobject]@{ AccessObjectName = ($ModuleName -replace '^Report_', ''); AcObjectType = $script:AC_REPORT }
-        } elseif (-not $docInfo -and $isFormDocumentSource) {
-            $docInfo = [pscustomobject]@{ AccessObjectName = ($ModuleName -replace '^Form_', ''); AcObjectType = $script:AC_FORM }
-        }
-
-        if ($ImportMode -eq "Code" -and $docInfo -and $src.ToLower().EndsWith('.cls')) {
-            if (-not $AccessApplication) { throw "Se necesita -AccessApplication para importar codigo de formularios/reportes desde .cls" }
-            $tmpDocText = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("VBAManager_docmerge_{0}.txt" -f [guid]::NewGuid().ToString("N"))
-            $docKind = if ($docInfo.AcObjectType -eq $script:AC_REPORT) { 'Report' } else { 'Form' }
-            $docNameCandidates = @(Get-AccessDocumentNameCandidates -ModuleName $ModuleName -Kind $docKind)
-            $savedFromExisting = $false
-            $lastSaveAsTextError = $null
-            foreach ($candidateName in $docNameCandidates) {
-                try {
-                    $AccessApplication.SaveAsText($docInfo.AcObjectType, $candidateName, $tmpDocText)
-                    $docInfo.AccessObjectName = $candidateName
-                    $savedFromExisting = $true
-                    break
-                } catch {
-                    $lastSaveAsTextError = $_
-                }
-            }
-
-            if (-not $savedFromExisting) {
-                $fullDocumentSource = Resolve-ImportFileForModule -ModulesPath $ModulesPath -ModuleName $ModuleName -ImportMode Form
-                if (-not $fullDocumentSource) {
-                    throw ("No se pudo exportar desde Access ningun documento base para '{0}' (candidatos: {1}) y tampoco existe un .form.txt/.report.txt local para recrearlo. Detalle: {2}" -f $ModuleName, ($docNameCandidates -join ', '), $lastSaveAsTextError.Exception.Message)
-                }
-
-                Write-Status -Message ("WARN: no existe un objeto base cargable para '{0}' (candidatos: {1}). Se intentara recrear desde '{2}'." -f $ModuleName, ($docNameCandidates -join ', '), $fullDocumentSource) -Color DarkYellow
-                Convert-Utf8ToAnsiTempFile -InputPath $fullDocumentSource -TempPath $tmpDocText
-                Merge-DocumentCodeBehindFromCls -DocumentTextPath $tmpDocText -ClsSourcePath $src
-
-                try { $AccessApplication.DoCmd.SetWarnings($false) } catch {}
-                try { $AccessApplication.DoCmd.Close($docInfo.AcObjectType, $docInfo.AccessObjectName, $script:AC_SAVENO) } catch {}
-                try { $AccessApplication.DoCmd.DeleteObject($docInfo.AcObjectType, $docInfo.AccessObjectName) } catch {}
-                $AccessApplication.LoadFromText($docInfo.AcObjectType, $docInfo.AccessObjectName, $tmpDocText)
-                return
-            }
-
-            Merge-DocumentCodeBehindFromCls -DocumentTextPath $tmpDocText -ClsSourcePath $src
-
-            try { $AccessApplication.DoCmd.SetWarnings($false) } catch {}
-            try { $AccessApplication.DoCmd.Close($docInfo.AcObjectType, $docInfo.AccessObjectName, $script:AC_SAVENO) } catch {}
-            try { $AccessApplication.DoCmd.DeleteObject($docInfo.AcObjectType, $docInfo.AccessObjectName) } catch {}
-            $AccessApplication.LoadFromText($docInfo.AcObjectType, $docInfo.AccessObjectName, $tmpDocText)
-            return
-        }
-
         Convert-Utf8ToAnsiTempFile -InputPath $src -TempPath $tmpAnsi
 
         # FIX: formularios usan LoadFromText — nunca VBComponents.Import
-        if ($isDocumentText) {
-            if (-not $AccessApplication) { throw "Se necesita -AccessApplication para importar objetos de documento (.form.txt/.report.txt)" }
-            if (-not $docInfo) {
-                if ($src -match '\.report\.txt$') {
-                    $docInfo = [pscustomobject]@{ AccessObjectName = ($ModuleName -replace '^Report_', ''); AcObjectType = $script:AC_REPORT }
-                } else {
-                    $docInfo = [pscustomobject]@{ AccessObjectName = ($ModuleName -replace '^Form_', ''); AcObjectType = $script:AC_FORM }
-                }
-            }
+        if ($isFormTxt) {
+            if (-not $AccessApplication) { throw "Se necesita -AccessApplication para importar formularios (.form.txt)" }
+            $formName = $ModuleName -replace '^Form_', ''
             try { $AccessApplication.DoCmd.SetWarnings($false) } catch {}
-            try { $AccessApplication.DoCmd.Close($docInfo.AcObjectType, $docInfo.AccessObjectName, $script:AC_SAVENO) } catch {}
-            try { $AccessApplication.DoCmd.DeleteObject($docInfo.AcObjectType, $docInfo.AccessObjectName) } catch {}
-            $AccessApplication.LoadFromText($docInfo.AcObjectType, $docInfo.AccessObjectName, $tmpAnsi)
+            # Cerrar el formulario si esta abierto — LoadFromText falla con "Cancelo la operacion anterior" si no
+            try { $AccessApplication.DoCmd.Close(2, $formName, 1) } catch {}  # acForm=2, acSaveNo=1
+            # acForm = 2
+            $AccessApplication.LoadFromText(2, $formName, $tmpAnsi)
             return
         }
 
-        # Determinar tipo esperado por extension del archivo fuente
-        # vbext_ct_StdModule = 1 (.bas), vbext_ct_ClassModule = 2 (.cls)
-        $extLower = $ext.ToLower()
-        $expectedType = if ($extLower -eq '.cls') { $script:VBEXT_CT_CLASSMODULE } else { $script:VBEXT_CT_STDMODULE }
-
-        # Strip metadatos VBE (VERSION, BEGIN/END, Attribute VB_*) del archivo temporal.
-        # AddFromFile no los parsea y los inyectaria como codigo.
-        Strip-VbaMetadataHeader -FilePath $tmpAnsi
-
-        # Comprobar si el componente ya existe en el VBProject
-        $component = $null
-        $componentExists = $false
+        # FIX: modulos y clases — DeleteLines + AddFromFile como primera opcion
+        # Evita VBComponents.Remove() que puede disparar dialogo VBE en instancias visibles
         try {
             $component = $VbProject.VBComponents.Item($ModuleName)
-            $componentExists = $true
-        } catch {
-            $componentExists = $false
-        }
-
-        if ($componentExists) {
-            $existingType = $component.Type  # 1=BAS, 2=CLS
-            if ($existingType -ne $expectedType) {
-                # Tipo cambia (ej: BAS->CLS o CLS->BAS) -- borrar y recrear
-                # porque Access no permite cambiar el tipo de un componente existente
-                Write-Status -Message ("Tipo cambia para '{0}': {1}->{2} -- Remove + Add" -f $ModuleName, $existingType, $expectedType) -Color Yellow
-                try { [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($component) | Out-Null } catch {}
-                $component = $null
-                $VbProject.VBComponents.Remove($VbProject.VBComponents.Item($ModuleName))
-                $componentExists = $false
-            }
-        }
-
-        if ($componentExists) {
-            # Tipo correcto -- reemplazar codigo sin tocar el componente (evita dialogo VBE)
             $codeModule = $component.CodeModule
             $count = $codeModule.CountOfLines
             if ($count -gt 0) { $codeModule.DeleteLines(1, $count) }
             $codeModule.AddFromFile($tmpAnsi)
-        } else {
-            # Componente no existe (nuevo o recien borrado por cambio de tipo)
-            # Crear con tipo explicito via Add(type) -- nunca Import que depende de headers VBE
-            $component = $VbProject.VBComponents.Add($expectedType)
-            $component.Name = $ModuleName
-            $codeModule = $component.CodeModule
-            $codeModule.AddFromFile($tmpAnsi)
+        } catch {
+            # El componente no existe aun — importar como nuevo (sin dialogo porque no hay nada que reemplazar)
+            $VbProject.VBComponents.Import($tmpAnsi) | Out-Null
         }
 
     } finally {
         if ($tmpAnsi -and (Test-Path -Path $tmpAnsi)) { Remove-Item -Path $tmpAnsi -Force -ErrorAction SilentlyContinue }
-        if ($tmpDocText -and (Test-Path -Path $tmpDocText)) { Remove-Item -Path $tmpDocText -Force -ErrorAction SilentlyContinue }
         foreach ($obj in @($codeModule, $component)) {
             if ($obj) { try { [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($obj) | Out-Null } catch {} }
         }
@@ -1430,7 +1002,7 @@ function Fix-EncodingInSrc {
             if ($f) { $targets += $f }
         }
     } else {
-        $targets = @(Get-ChildItem -Path $ModulesPath -Recurse -File -Include "*.bas", "*.cls", "*.frm", "*.form.txt", "*.report.txt" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)
+        $targets = @(Get-ChildItem -Path $ModulesPath -Recurse -File -Include "*.bas", "*.cls", "*.frm", "*.form.txt" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)
     }
 
     $fixed = 0
@@ -1498,7 +1070,7 @@ function Export-DataStructure {
                 $td = $database.TableDefs[$tableName]
                 [void]$sb.AppendLine("### $tableName")
                 [void]$sb.AppendLine("")
-                [void]$sb.AppendLine("| Campo | Tipo | Tamano | Requerido | PK |")
+                [void]$sb.AppendLine("| Campo | Tipo | Tamaño | Requerido | PK |")
                 [void]$sb.AppendLine("|---|---|---|---|---|")
 
                 $pkFields = @()
@@ -1542,17 +1114,13 @@ function Export-DataStructure {
                 for ($i = 0; $i -lt $relations.Count; $i++) {
                     try {
                         $rel = $relations[$i]
-                        $originFields = [System.Collections.Generic.List[string]]::new()
-                        $foreignFields = [System.Collections.Generic.List[string]]::new()
+                        $originField = ""
+                        $foreignField = ""
                         if ($rel.Fields.Count -gt 0) {
-                            for ($j = 0; $j -lt $rel.Fields.Count; $j++) {
-                                $rf = $rel.Fields[$j]
-                                $originFields.Add($rf.Name)
-                                $foreignFields.Add($rf.ForeignName)
-                            }
+                            $rf = $rel.Fields[0]
+                            $originField = $rf.Name
+                            $foreignField = $rf.ForeignName
                         }
-                        $originField = $originFields -join ", "
-                        $foreignField = $foreignFields -join ", "
                         [void]$sb.AppendLine("| $($rel.Name) | $($rel.Table) | $originField | $($rel.ForeignTable) | $foreignField |")
                     } catch {}
                 }
@@ -1615,12 +1183,23 @@ function Fix-EncodingInAccess {
         $AccessApplication = $null
     )
 
+    $components = $VbProject.VBComponents
     $names = @()
 
     if ($ModuleName -and $ModuleName.Count -gt 0) {
         $names = @($ModuleName | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
     } else {
-        $names = @(Get-VbComponentNames -VbProject $VbProject)
+        for ($i = 1; $i -le $components.Count; $i++) {
+            $c = $components.Item($i)
+            try {
+                $type = [int]$c.Type
+                if ($type -ne 1 -and $type -ne 2 -and $type -ne 100 -and $type -ne 3) { continue }
+                $ext = Get-ComponentExtension -Component $c -ModuleName $c.Name
+                if ($ext) { $names += $c.Name }
+            } finally {
+                try { [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($c) | Out-Null } catch {}
+            }
+        }
     }
 
     $fixed = 0
@@ -1636,65 +1215,6 @@ function Fix-EncodingInAccess {
     return $fixed
 }
 
-function Get-FrontendObjects {
-    [CmdletBinding()]
-    Param(
-        [Parameter(Mandatory = $true)]$AccessApplication,
-        [Parameter(Mandatory = $true)]$VbProject,
-        [Parameter(Mandatory = $true)][string]$AccessPath
-    )
-
-    $forms = [System.Collections.Generic.List[string]]::new()
-    $reports = [System.Collections.Generic.List[string]]::new()
-    $modules = [System.Collections.Generic.List[string]]::new()
-    $classes = [System.Collections.Generic.List[string]]::new()
-    $documentModules = [System.Collections.Generic.List[string]]::new()
-    $components = [System.Collections.Generic.List[object]]::new()
-
-    try {
-        foreach ($f in $AccessApplication.CurrentProject.AllForms) {
-            if ($f -and -not [string]::IsNullOrWhiteSpace($f.Name) -and -not $forms.Contains($f.Name)) {
-                $forms.Add($f.Name)
-            }
-        }
-    } catch {}
-
-    try {
-        foreach ($r in $AccessApplication.CurrentProject.AllReports) {
-            if ($r -and -not [string]::IsNullOrWhiteSpace($r.Name) -and -not $reports.Contains($r.Name)) {
-                $reports.Add($r.Name)
-            }
-        }
-    } catch {}
-
-    try {
-        foreach ($component in $VbProject.VBComponents) {
-            $name = [string]$component.Name
-            $type = $component.Type
-            $components.Add([pscustomobject]@{
-                Name = $name
-                Type = $type
-            })
-
-            switch ($type) {
-                1 { if (-not [string]::IsNullOrWhiteSpace($name) -and -not $modules.Contains($name)) { $modules.Add($name) } }
-                2 { if (-not [string]::IsNullOrWhiteSpace($name) -and -not $classes.Contains($name)) { $classes.Add($name) } }
-                100 { if (-not [string]::IsNullOrWhiteSpace($name) -and -not $documentModules.Contains($name)) { $documentModules.Add($name) } }
-            }
-        }
-    } catch {}
-
-    return [pscustomobject]([ordered]@{
-        accessPath       = $AccessPath
-        forms            = @($forms | Sort-Object -Unique)
-        reports          = @($reports | Sort-Object -Unique)
-        modules          = @($modules | Sort-Object -Unique)
-        classes          = @($classes | Sort-Object -Unique)
-        documentModules  = @($documentModules | Sort-Object -Unique)
-        components       = @($components | Sort-Object Name)
-    })
-}
-
 $session = $null
 
 try {
@@ -1702,13 +1222,11 @@ try {
 
     if ($Action -ne "Generate-ERD") {
         $AccessPath = Resolve-AccessPath -AccessPath $AccessPath
-        $ModulesPath = Resolve-ModulesPath -DestinationRoot $DestinationRoot -Action $Action
+        $ModulesPath = Resolve-ModulesPath -DestinationRoot $DestinationRoot -AccessPath $AccessPath -Action $Action
 
-        if ($Action -ne "List-Objects") {
-            Write-Status -Message ("Accion: {0}" -f $Action) -Color Yellow
-            Write-Status -Message ("Base de datos: {0}" -f $AccessPath) -Color Yellow
-            Write-Status -Message ("Carpeta: {0}" -f $ModulesPath) -Color Yellow
-        }
+        Write-Status -Message ("Accion: {0}" -f $Action) -Color Yellow
+        Write-Status -Message ("Base de datos: {0}" -f $AccessPath) -Color Yellow
+        Write-Status -Message ("Carpeta: {0}" -f $ModulesPath) -Color Yellow
     } else {
         Write-Status -Message ("Accion: {0}" -f $Action) -Color Yellow
     }
@@ -1721,21 +1239,25 @@ try {
     }
     $normalizedModules = @($inputModules | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 
-    if ($Action -eq "List-Objects") {
-        $session = Open-AccessDatabase -AccessPath $AccessPath -Password $Password
-        $objects = Get-FrontendObjects -AccessApplication $session.AccessApplication -VbProject $session.VbProject -AccessPath $AccessPath
-        $json = $objects | ConvertTo-Json -Depth 6 -Compress
-        Write-Output $json
-
-    } elseif ($Action -eq "Export") {
+    if ($Action -eq "Export") {
         $session = Open-AccessDatabase -AccessPath $AccessPath -Password $Password
         $vbProject = $session.VbProject
+        $components = $vbProject.VBComponents
 
         $targets = @()
         if ($normalizedModules.Count -gt 0) {
             $targets = $normalizedModules
         } else {
-            $targets = @(Get-VbComponentNames -VbProject $vbProject)
+            for ($i = 1; $i -le $components.Count; $i++) {
+                $c = $components.Item($i)
+                try {
+                    $ext = Get-ComponentExtension -Component $c -ModuleName $c.Name
+                    if ($ext) { $targets += $c.Name }
+                } finally {
+                    try { [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($c) | Out-Null } catch {}
+                }
+            }
+            $targets = $targets | Sort-Object -Unique
         }
 
         $total = $targets.Count
@@ -1758,10 +1280,9 @@ try {
         } else {
             # FIX: incluir *.form.txt y extraer nombre correctamente
             $targets = @(Get-ChildItem -Path $ModulesPath -File -Recurse `
-                -Include "*.bas", "*.cls", "*.frm", "*.form.txt", "*.report.txt" -ErrorAction SilentlyContinue |
+                -Include "*.bas", "*.cls", "*.frm", "*.form.txt" -ErrorAction SilentlyContinue |
                 ForEach-Object {
                     if ($_.Name -match '\.form\.txt$') { $_.Name -replace '\.form\.txt$', '' }
-                    elseif ($_.Name -match '\.report\.txt$') { $_.Name -replace '\.report\.txt$', '' }
                     else { $_.BaseName }
                 } | Sort-Object -Unique)
         }
@@ -1814,178 +1335,6 @@ try {
 
         Write-Status -Message ("OK ERD generado en: {0}" -f $mdFile) -Color Green
 
-    } elseif ($Action -eq "Sandbox") {
-        # =====================================================================
-        # SANDBOX: Copiar backends vinculados al lado del frontend y
-        #          revincular las tablas para que apunten a las copias locales.
-        #          Resultado: un sandbox aislado de produccion.
-        # =====================================================================
-        $frontDir = Split-Path $AccessPath -Parent
-        $bkpPassword = if ($BackendPassword) { $BackendPassword } else { $Password }
-        if ($KeepSidecars) {
-            Write-Status -Message "INFO: -KeepSidecars no tiene efecto hoy; los sidecars se mantienen siempre mientras exista el sandbox." -Color DarkYellow
-        }
-
-        # --- Fase 1: Descubrir backends vinculados via DAO ---
-        Write-Status -Message "Descubriendo tablas vinculadas..." -Color Cyan
-        $daoEngine = $null; $daoDb = $null
-        $backendMap = @{}  # ruta_backend_original -> @(infoTablaVinculada, ...)
-        try {
-            $daoEngine = New-DaoDbEngine
-            if (-not $daoEngine) { throw "No se pudo crear DAO.DBEngine" }
-            $frontConn = if ($Password) { ";PWD=$Password" } else { "" }
-            $daoDb = $daoEngine.OpenDatabase($AccessPath, $false, $false, $frontConn)
-            $tdefs = $daoDb.TableDefs
-            for ($i = 0; $i -lt $tdefs.Count; $i++) {
-                $td = $tdefs[$i]
-                $tName = $td.Name
-                if ($tName -match "^~" -or $tName -match "^MSys") { continue }
-                $srcTable = $td.SourceTableName
-                $connect  = $td.Connect
-                if ([string]::IsNullOrEmpty($srcTable)) { continue }
-                # Extraer ruta del backend: ";DATABASE=C:\...\file.accdb;..."
-                if ($connect -match "DATABASE=([^;]+)") {
-                    $backendPath = $Matches[1].Trim()
-                    if (-not $backendMap.ContainsKey($backendPath)) {
-                        $backendMap[$backendPath] = [System.Collections.Generic.List[object]]::new()
-                    }
-                    $backendMap[$backendPath].Add([pscustomobject]@{
-                        LocalName       = $tName
-                        SourceTableName = $srcTable
-                        Connect         = $connect
-                        BackendPath     = $backendPath
-                    })
-                }
-            }
-        } finally {
-            if ($daoDb) { try { $daoDb.Close() } catch {} }
-            foreach ($o in @($daoDb, $daoEngine)) {
-                if ($o) { try { [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($o) | Out-Null } catch {} }
-            }
-            [System.GC]::Collect(); [System.GC]::WaitForPendingFinalizers()
-        }
-
-        if ($backendMap.Count -eq 0) {
-            Write-Status -Message "El frontend no tiene tablas vinculadas. Nada que hacer." -Color Green
-            return
-        }
-
-        $totalTables = ($backendMap.Values | ForEach-Object { $_.Count } | Measure-Object -Sum).Sum
-        Write-Status -Message ("Encontrados {0} backend(s) con {1} tabla(s) vinculada(s):" -f $backendMap.Count, $totalTables) -Color Yellow
-        foreach ($bk in $backendMap.Keys) {
-            Write-Status -Message ("  {0} ({1} tablas)" -f $bk, $backendMap[$bk].Count) -Color Gray
-        }
-
-        # --- Fase 2: Copiar cada backend al lado del frontend ---
-        Write-Status -Message "Copiando backends al directorio del frontend..." -Color Cyan
-        $sidecarMap = @{}  # ruta_original -> ruta_sidecar
-        foreach ($originalPath in $backendMap.Keys) {
-            $backendFileName = Split-Path $originalPath -Leaf
-            $sidecarPath = Join-Path $frontDir $backendFileName
-
-            if ($sidecarPath -eq $originalPath) {
-                Write-Status -Message ("  SKIP: {0} ya esta en el directorio del frontend" -f $backendFileName) -Color Yellow
-                $sidecarMap[$originalPath] = $originalPath
-                continue
-            }
-
-            if (Test-Path $sidecarPath) {
-                Write-Status -Message ("  Reemplazando sidecar existente: {0}" -f $backendFileName) -Color Yellow
-                Remove-Item $sidecarPath -Force
-            }
-
-            if (-not (Test-Path $originalPath)) {
-                throw ("Backend no accesible: {0}" -f $originalPath)
-            }
-
-            Copy-Item -LiteralPath $originalPath -Destination $sidecarPath -Force
-            Write-Status -Message ("  Copiado: {0}" -f $backendFileName) -Color Green
-            $sidecarMap[$originalPath] = $sidecarPath
-        }
-
-        # --- Fase 3: Abrir frontend via COM y revincular ---
-        # Esperar a que los locks se liberen
-        Start-Sleep -Milliseconds 500
-
-        Write-Status -Message "Abriendo frontend via COM para revincular tablas..." -Color Cyan
-        $session = Open-AccessDatabase -AccessPath $AccessPath -Password $Password
-        $comDb = $null
-
-        try {
-            $comDb = $session.AccessApplication.CurrentDb()
-
-            # Guardar connect strings originales para rollback si falla la revinculacion
-            $originalLinks = @{}
-            for ($i = 0; $i -lt $comDb.TableDefs.Count; $i++) {
-                $td = $comDb.TableDefs[$i]
-                if (-not [string]::IsNullOrEmpty($td.SourceTableName)) {
-                    $originalLinks[$td.Name] = @{
-                        SourceTableName = $td.SourceTableName
-                        Connect = $td.Connect
-                    }
-                }
-            }
-
-            # Actualizar vinculos existentes via Connect + RefreshLink.
-            # Solo crear TableDef nuevo si el vinculo no existe o no puede refrescarse.
-            $okCount = 0; $errorCount = 0
-            foreach ($originalPath in $backendMap.Keys) {
-                $sidecarPath = $sidecarMap[$originalPath]
-                $tables = $backendMap[$originalPath]
-                $newConnect = ";DATABASE=$sidecarPath;PWD=$bkpPassword;"
-
-                foreach ($tableInfo in $tables) {
-                    try {
-                        $linkedTd = $null
-                        try { $linkedTd = $comDb.TableDefs[$tableInfo.LocalName] } catch {}
-                        if ($linkedTd) {
-                            $linkedTd.Connect = $newConnect
-                            $linkedTd.RefreshLink()
-                            try { $comDb.TableDefs.Refresh() } catch {}
-                        } else {
-                            $newTd = $comDb.CreateTableDef($tableInfo.LocalName, 0, $tableInfo.SourceTableName, $newConnect)
-                            $comDb.TableDefs.Append($newTd)
-                        }
-                        Write-Status -Message ("  OK: {0} -> {1}" -f $tableInfo.LocalName, (Split-Path $sidecarPath -Leaf)) -Color Green
-                        $okCount++
-                    } catch {
-                        Write-Status -Message ("  ERROR: {0} - {1}" -f $tableInfo.LocalName, $_.Exception.Message) -Color Red
-                        $errorCount++
-                    }
-                }
-            }
-
-            # Si hubo errores, intentar rollback restaurando vinculos originales
-            if ($errorCount -gt 0) {
-                Write-Status -Message "Errores detectados -- intentando rollback de vinculos originales..." -Color Yellow
-                foreach ($tname in $originalLinks.Keys) {
-                    try {
-                        $info = $originalLinks[$tname]
-                        $restoreTd = $null
-                        try { $restoreTd = $comDb.TableDefs[$tname] } catch {}
-                        if ($restoreTd) {
-                            $restoreTd.Connect = $info.Connect
-                            $restoreTd.RefreshLink()
-                            try { $comDb.TableDefs.Refresh() } catch {}
-                        } else {
-                            $restoreTd = $comDb.CreateTableDef($tname, 0, $info.SourceTableName, $info.Connect)
-                            $comDb.TableDefs.Append($restoreTd)
-                        }
-                        Write-Status -Message ("  Restaurada: {0}" -f $tname) -Color DarkYellow
-                    } catch {
-                        Write-Status -Message ("  FALLO restaurar: {0} - {1}" -f $tname, $_.Exception.Message) -Color Red
-                    }
-                }
-            }
-
-            Write-Status -Message ("Sandbox completado: {0} OK, {1} errores" -f $okCount, $errorCount) -Color $(if ($errorCount -eq 0) { "Green" } else { "Yellow" })
-
-        } finally {
-            if ($comDb) {
-                try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($comDb) | Out-Null } catch {}
-            }
-        }
-
     } else {
         $fixedSrc = 0
         $fixedAccess = 0
@@ -2005,8 +1354,6 @@ try {
     }
 } finally {
     if ($session) {
-        try { Close-AccessDatabase -Session $session -AccessPath $AccessPath -Password $Password } catch {
-            Write-Status -Message ("ERROR cerrando sesion de Access: {0}" -f $_.Exception.Message) -Color Red
-        }
+        try { Close-AccessDatabase -Session $session -AccessPath $AccessPath -Password $Password } catch {}
     }
 }
