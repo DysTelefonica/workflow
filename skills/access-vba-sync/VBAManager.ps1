@@ -426,6 +426,114 @@ function Convert-Utf8ToAnsiTempFile {
     [System.IO.File]::WriteAllText($TempPath, $text, $ansi)
 }
 
+function Test-IsVbaImportMetadataLine {
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory = $true)][string]$Line
+    )
+
+    $trim = $Line.Trim()
+    if ([string]::IsNullOrWhiteSpace($trim)) { return $false }
+
+    return (
+        $trim -match '^VERSION\s+\d+(\.\d+)?\s+CLASS$' -or
+        $trim -match '^BEGIN\b' -or
+        $trim -match '^END$' -or
+        $trim -match '^(MultiUse|Persistable|DataBindingBehavior|DataSourceBehavior|MTSTransactionMode)\s*=' -or
+        $trim -match '^Attribute\s+VB_'
+    )
+}
+
+function Test-IsVbaOptionDirectiveLine {
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory = $true)][string]$Line
+    )
+
+    $trim = $Line.Trim()
+    return ($trim -match '^Option\s+(Compare\s+\w+|Explicit|Base\s+\d+|Private\s+Module)$')
+}
+
+function Normalize-VbaImportText {
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory = $true)][string]$Text
+    )
+
+    $normalized = $Text -replace "`r`n", "`n" -replace "`r", "`n"
+    $lines = @($normalized -split "`n", -1)
+    if ($lines.Count -eq 0) { return "" }
+
+    if ($lines[0].Length -gt 0 -and [int][char]$lines[0][0] -eq 0xFEFF) {
+        $lines[0] = $lines[0].Substring(1)
+    }
+
+    $start = 0
+    while ($start -lt $lines.Count) {
+        $trim = $lines[$start].Trim()
+        if ($trim -eq "") {
+            $start++
+            continue
+        }
+        if (Test-IsVbaImportMetadataLine -Line $lines[$start]) {
+            $start++
+            continue
+        }
+        break
+    }
+
+    $result = New-Object System.Collections.Generic.List[string]
+    $seenOptions = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    $inDirectiveBlock = $true
+
+    for ($i = $start; $i -lt $lines.Count; $i++) {
+        $line = $lines[$i]
+        $trim = $line.Trim()
+
+        if ($inDirectiveBlock) {
+            if ($trim -eq "") {
+                $result.Add($line)
+                continue
+            }
+
+            if (Test-IsVbaImportMetadataLine -Line $line) {
+                continue
+            }
+
+            if (Test-IsVbaOptionDirectiveLine -Line $line) {
+                if ($seenOptions.Add($trim)) {
+                    $result.Add($line)
+                }
+                continue
+            }
+
+            $inDirectiveBlock = $false
+        }
+
+        $result.Add($line)
+    }
+
+    while ($result.Count -gt 0 -and [string]::IsNullOrWhiteSpace($result[0])) {
+        $result.RemoveAt(0)
+    }
+
+    return [string]::Join("`r`n", $result)
+}
+
+function Convert-Utf8CodeImportToAnsiTempFile {
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory = $true)][string]$InputPath,
+        [Parameter(Mandatory = $true)][string]$TempPath
+    )
+
+    $utf8 = [System.Text.Encoding]::UTF8
+    $ansi = [System.Text.Encoding]::GetEncoding(1252)
+    $text = [System.IO.File]::ReadAllText($InputPath, $utf8)
+    $sanitized = Normalize-VbaImportText -Text $text
+    [System.IO.File]::WriteAllText($TempPath, $sanitized, $ansi)
+}
+
 function Get-ProcessIdFromHwnd {
     [CmdletBinding()]
     Param(
@@ -949,14 +1057,14 @@ function Import-VbaModule {
     $isFormTxt = ($src -match '\.form\.txt$')
     $ext = [System.IO.Path]::GetExtension($src)
     $tmpAnsi = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("VBAManager_import_{0}{1}" -f @([guid]::NewGuid().ToString("N"), $ext))
+    $tmpAnsiSanitized = $null
     $component = $null
     $codeModule = $null
 
     try {
-        Convert-Utf8ToAnsiTempFile -InputPath $src -TempPath $tmpAnsi
-
         # FIX: formularios usan LoadFromText — nunca VBComponents.Import
         if ($isFormTxt) {
+            Convert-Utf8ToAnsiTempFile -InputPath $src -TempPath $tmpAnsi
             if (-not $AccessApplication) { throw "Se necesita -AccessApplication para importar formularios (.form.txt)" }
             $formName = $ModuleName -replace '^Form_', ''
             try { $AccessApplication.DoCmd.SetWarnings($false) } catch {}
@@ -969,12 +1077,15 @@ function Import-VbaModule {
 
         # FIX: modulos y clases — DeleteLines + AddFromFile como primera opcion
         # Evita VBComponents.Remove() que puede disparar dialogo VBE en instancias visibles
+        Convert-Utf8ToAnsiTempFile -InputPath $src -TempPath $tmpAnsi
+        $tmpAnsiSanitized = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("VBAManager_import_sanitized_{0}{1}" -f @([guid]::NewGuid().ToString("N"), $ext))
+        Convert-Utf8CodeImportToAnsiTempFile -InputPath $src -TempPath $tmpAnsiSanitized
         try {
             $component = $VbProject.VBComponents.Item($ModuleName)
             $codeModule = $component.CodeModule
             $count = $codeModule.CountOfLines
             if ($count -gt 0) { $codeModule.DeleteLines(1, $count) }
-            $codeModule.AddFromFile($tmpAnsi)
+            $codeModule.AddFromFile($tmpAnsiSanitized)
         } catch {
             # El componente no existe aun — importar como nuevo (sin dialogo porque no hay nada que reemplazar)
             $VbProject.VBComponents.Import($tmpAnsi) | Out-Null
@@ -982,6 +1093,7 @@ function Import-VbaModule {
 
     } finally {
         if ($tmpAnsi -and (Test-Path -Path $tmpAnsi)) { Remove-Item -Path $tmpAnsi -Force -ErrorAction SilentlyContinue }
+        if ($tmpAnsiSanitized -and (Test-Path -Path $tmpAnsiSanitized)) { Remove-Item -Path $tmpAnsiSanitized -Force -ErrorAction SilentlyContinue }
         foreach ($obj in @($codeModule, $component)) {
             if ($obj) { try { [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($obj) | Out-Null } catch {} }
         }

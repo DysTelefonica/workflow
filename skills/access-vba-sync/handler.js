@@ -43,6 +43,75 @@ function moduleNameFromFile(filePath) {
   return path.basename(filePath, path.extname(filePath));
 }
 
+function isVbaMetadataLine(line) {
+  const trim = String(line || "").trim();
+  if (!trim) return false;
+  return (
+    /^VERSION\s+\d+(\.\d+)?\s+CLASS$/i.test(trim) ||
+    /^BEGIN\b/i.test(trim) ||
+    /^END$/i.test(trim) ||
+    /^(MultiUse|Persistable|DataBindingBehavior|DataSourceBehavior|MTSTransactionMode)\s*=/i.test(trim) ||
+    /^Attribute\s+VB_/i.test(trim)
+  );
+}
+
+function isVbaOptionDirectiveLine(line) {
+  const trim = String(line || "").trim();
+  return /^Option\s+(Compare\s+\w+|Explicit|Base\s+\d+|Private\s+Module)$/i.test(trim);
+}
+
+function sanitizeVbaImportText(text) {
+  const normalized = String(text || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const lines = normalized.split("\n");
+  if (lines.length > 0 && lines[0].charCodeAt(0) === 0xfeff) {
+    lines[0] = lines[0].slice(1);
+  }
+
+  let start = 0;
+  while (start < lines.length) {
+    const trim = lines[start].trim();
+    if (!trim || isVbaMetadataLine(lines[start])) {
+      start++;
+      continue;
+    }
+    break;
+  }
+
+  const out = [];
+  const seenOptions = new Set();
+  let inDirectiveBlock = true;
+
+  for (let i = start; i < lines.length; i++) {
+    const line = lines[i];
+    const trim = line.trim();
+
+    if (inDirectiveBlock) {
+      if (!trim) {
+        out.push(line);
+        continue;
+      }
+
+      if (isVbaMetadataLine(line)) continue;
+
+      if (isVbaOptionDirectiveLine(line)) {
+        const key = trim.toLowerCase();
+        if (!seenOptions.has(key)) {
+          seenOptions.add(key);
+          out.push(line);
+        }
+        continue;
+      }
+
+      inDirectiveBlock = false;
+    }
+
+    out.push(line);
+  }
+
+  while (out.length > 0 && !out[0].trim()) out.shift();
+  return out.join("\r\n");
+}
+
 class AccessVbaSyncSkill {
   constructor(options = {}) {
     this.skillDir = options.skillDir || __dirname;
@@ -141,6 +210,48 @@ class AccessVbaSyncSkill {
     return destinationRootAbs;
   }
 
+  async initializeSession({ accessPath, performInitialExport = false } = {}) {
+    await this.ensureReady();
+    await this.loadSessionFromDisk();
+
+    const detectedAccess = await this.detectAccessPath({ accessPath });
+    if (!detectedAccess) {
+      throw new Error("No se encontró ninguna BD .accdb/.accde/.mdb/.mde en CWD y no se pasó --access.");
+    }
+
+    const destinationRootAbs = this.resolveDestinationRoot();
+    await fsp.mkdir(destinationRootAbs, { recursive: true });
+    const modulesPath = this.modulesPathFor(detectedAccess, destinationRootAbs);
+
+    this.session.active = true;
+    this.session.startedAt = this.session.startedAt || new Date().toISOString();
+    this.session.accessPath = detectedAccess;
+    this.session.destinationRoot = destinationRootAbs;
+    this.session.modulesPath = modulesPath;
+    this.session.changedModules = Array.isArray(this.session.changedModules) ? this.session.changedModules : [];
+    this.session.lastSyncAt = this.session.lastSyncAt || null;
+    this.session.pendingModules = [];
+    this.session.watcherPid = null;
+
+    await this.saveSessionToDisk();
+
+    if (performInitialExport) {
+      console.log("🚀 Export inicial (todos los módulos)...");
+      await this.runVbaManager({
+        action: "Export",
+        accessPath: detectedAccess,
+        destinationRootAbs
+      });
+      console.log("✓ Export inicial completado");
+      console.log(`📁 modulesPath: ${modulesPath}`);
+      await this.saveSessionToDisk();
+      return;
+    }
+
+    console.log("ℹ️  Sesión preparada sin export inicial.");
+    console.log(`📁 modulesPath: ${modulesPath}`);
+  }
+
   runVbaManager({ action, accessPath, destinationRootAbs, moduleNames = [], backendPath, erdPath, location, importMode }) {
     return new Promise((resolve, reject) => {
       const exe = powershellExe();
@@ -222,40 +333,7 @@ class AccessVbaSyncSkill {
   }
 
   async start({ accessPath } = {}) {
-    await this.ensureReady();
-    await this.loadSessionFromDisk();
-
-    const detectedAccess = await this.detectAccessPath({ accessPath });
-    if (!detectedAccess) {
-      throw new Error("No se encontró ninguna BD .accdb/.accde/.mdb/.mde en CWD y no se pasó --access.");
-    }
-
-    const destinationRootAbs = this.resolveDestinationRoot();
-    await fsp.mkdir(destinationRootAbs, { recursive: true });
-    const modulesPath = this.modulesPathFor(detectedAccess, destinationRootAbs);
-
-    this.session.active = true;
-    this.session.startedAt = new Date().toISOString();
-    this.session.accessPath = detectedAccess;
-    this.session.destinationRoot = destinationRootAbs;
-    this.session.modulesPath = modulesPath;
-    this.session.changedModules = Array.isArray(this.session.changedModules) ? this.session.changedModules : [];
-    this.session.lastSyncAt = this.session.lastSyncAt || null;
-    this.session.pendingModules = [];
-    this.session.watcherPid = null;
-
-    await this.saveSessionToDisk();
-
-    console.log("🚀 Export inicial (todos los módulos)...");
-    await this.runVbaManager({
-      action: "Export",
-      accessPath: detectedAccess,
-      destinationRootAbs
-    });
-    console.log("✓ Export inicial completado");
-    console.log(`📁 modulesPath: ${modulesPath}`);
-
-    await this.saveSessionToDisk();
+    await this.initializeSession({ accessPath, performInitialExport: true });
   }
 
   async syncCodeBehind(moduleNames) {
@@ -284,6 +362,7 @@ class AccessVbaSyncSkill {
       try {
         clsContent = fs.readFileSync(clsPath, "utf8");
       } catch { continue; }
+      clsContent = sanitizeVbaImportText(clsContent);
       
       const uiPart = formContent.substring(0, cbIndex);
       const newFormContent = uiPart + "CodeBehind\r\n" + clsContent;
@@ -301,7 +380,7 @@ class AccessVbaSyncSkill {
     await this.loadSessionFromDisk();
 
     if (!this.session.active) {
-      await this.start({ accessPath });
+      await this.initializeSession({ accessPath, performInitialExport: false });
       await this.loadSessionFromDisk();
     }
 
@@ -594,7 +673,7 @@ class AccessVbaSyncSkill {
     await this.loadSessionFromDisk();
 
     if (!this.session.active) {
-      await this.start({ accessPath });
+      await this.initializeSession({ accessPath, performInitialExport: false });
       await this.loadSessionFromDisk();
     }
 
@@ -640,7 +719,7 @@ class AccessVbaSyncSkill {
     await this.loadSessionFromDisk();
 
     if (!this.session.active) {
-      await this.start({ accessPath });
+      await this.initializeSession({ accessPath, performInitialExport: false });
       await this.loadSessionFromDisk();
     }
 
