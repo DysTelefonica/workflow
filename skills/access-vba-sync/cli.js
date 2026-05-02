@@ -57,9 +57,11 @@ function printHelp() {
       "  node cli.js export  <Mod..>[--access <ruta>] [--destination_root <dir>] [--password <pwd>]",
       "  node cli.js export-all     [--access <ruta>] [--destination_root <dir>] [--password <pwd>]",
       "  node cli.js import  <Mod..>[--access <ruta>] [--destination_root <dir>] [--password <pwd>]",
-      "  node cli.js import-form <Mod..>[--access <ruta>] [--destination_root <dir>] [--password <pwd>]",
-      "  node cli.js import-code <Mod..>[--access <ruta>] [--destination_root <dir>] [--password <pwd>]",
+      "  node cli.js import-form <Mod..>[--access <ruta>] [--destination_root <dir>] [--password <pwd>]   (avanzado)",
+      "  node cli.js import-code <Mod..>[--access <ruta>] [--destination_root <dir>] [--password <pwd>]   (avanzado)",
       "  node cli.js import-all     [--access <ruta>] [--destination_root <dir>] [--password <pwd>]",
+      "  node cli.js list-objects   [--access <ruta>] [--password <pwd>] [--json]",
+      "  node cli.js exists <Mod>   [--access <ruta>] [--password <pwd>] [--json]",
       "  node cli.js sync    <Mod..>[--access <ruta>] [--destination_root <dir>] [--password <pwd>]",
       "  node cli.js fix-encoding   [--access <ruta>] [--destination_root <dir>] [--password <pwd>] [--location Both|Src|Access] [<Mod...>]",
       "  node cli.js generate-erd   [--backend <ruta>] [--erd_path <dir>] [--password <pwd>]",
@@ -67,32 +69,36 @@ function printHelp() {
       "  node cli.js end            [--auto_export_on_end false]",
       "",
       "Comandos:",
-      "  start            Export inicial de todos los módulos + inicia sesión",
-      "  watch            Inicia sesión (si no hay) + auto-sync al guardar archivos",
+      "  start            Export inicial de todos los módulos + inicia sesión/watch (opcional)",
+      "  watch            Inicia sesión/watch (si no hay) + auto-sync al guardar archivos",
       "  export  <Mod..>  Exporta módulos específicos de la BD hacia src/",
       "  export-all       Exporta todos los módulos de la BD hacia src/",
-      "  import  <Mod..>  Importa módulos específicos de src/ hacia la BD",
-      "  import-form <Mod..> Importa formularios desde *.form.txt (UI + código)",
-      "  import-code <Mod..> Importa code-behind desde *.cls/*.bas (sin layout)",
+      "  import  <Mod..>  Comando canónico: detecta si cada entrada es módulo, clase o formulario y hace el import correcto",
+      "  import-form <Mod..> Importa formularios desde *.form.txt (UI + código) [uso avanzado]",
+        "  import-code <Mod..> Importa code-behind; bloquea crear Modulo1/Modulo2 si el target parece form/report [uso avanzado]",
       "  import-all       Importa todos los módulos de src/ hacia la BD",
+      "  list-objects     Lista forms, reports, modules, classes y document modules del frontend",
+      "  exists <Mod>     Indica si existe realmente en Access/VBA y cómo se resolvió",
       "  sync    <Mod..>  Alias de import",
       "  fix-encoding     Corrige encoding (ANSI→UTF-8 sin BOM) en src/, en la BD, o en ambos",
       "                   Sin módulos: procesa todos. Con módulos: solo los indicados.",
       "  generate-erd     Genera documentación de estructura de tablas en Markdown",
-      "  status           Muestra el estado de la sesión activa",
-      "  end              Cierra la sesión y restaura la configuración de Access",
+      "  status           Muestra el estado de la sesión/watch activa",
+      "  end              Cierra la sesión/watch y restaura la configuración de Access",
       "",
       "Flags comunes:",
       "  --access <ruta>              Ruta .accdb/.accde/.mdb/.mde (relativa a CWD o absoluta)",
       "  --password <pwd>             Contraseña de la BD si está protegida",
       "  --destination_root <dir>     Carpeta de export/import (default: src)",
+      "  --destination <dir>          Alias de --destination_root",
       "",
       "Flags específicos:",
       "  --debounce_ms <n>            Debounce para watch en ms (default: 600)",
       "  --auto_export_on_end false   Desactiva export final al cerrar sesión",
       "  --location Both|Src|Access   Para fix-encoding: dónde aplicar (default: Both)",
       "  --backend <ruta>             Para generate-erd: ruta al backend _Datos.accdb",
-      "  --erd_path <dir>             Para generate-erd: carpeta de salida (default: docs/ERD)"
+      "  --erd_path <dir>             Para generate-erd: carpeta de salida (default: docs/ERD)",
+      "  --json                       Salida JSON para exists/list-objects"
     ].join("\n")
   );
 }
@@ -105,10 +111,12 @@ async function main() {
     return;
   }
 
+  const destinationRootFlag = flags.destination_root || flags.destination || "src";
+
   const skill = new AccessVbaSyncSkill({
     skillDir: __dirname,
     projectRoot: process.cwd(),
-    destinationRoot: flags.destination_root || "src",
+    destinationRoot: destinationRootFlag,
     debounceMs: Number.isFinite(Number(flags.debounce_ms)) ? Number(flags.debounce_ms) : 600,
     autoExportOnEnd: toBoolFlag(flags.auto_export_on_end, true),
     password: flags.password || null
@@ -173,6 +181,27 @@ async function main() {
 
   if (command === "import-all") {
     await skill.importAll({ accessPath });
+    return;
+  }
+
+  if (command === "list-objects") {
+    const result = await skill.listObjects({ accessPath, json: toBoolFlag(flags.json, false) });
+    if (toBoolFlag(flags.json, false)) {
+      console.log(JSON.stringify(result, null, 2));
+    }
+    return;
+  }
+
+  if (command === "exists") {
+    if (mods.length !== 1) {
+      console.error("exists requiere exactamente un nombre. Ejemplo: node cli.js exists subfrmDatosPCSUB_DictamenRAC");
+      process.exitCode = 1;
+      return;
+    }
+    const result = await skill.exists({ moduleName: mods[0], accessPath, json: toBoolFlag(flags.json, false) });
+    if (toBoolFlag(flags.json, false)) {
+      console.log(JSON.stringify(result, null, 2));
+    }
     return;
   }
 

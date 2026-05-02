@@ -29,7 +29,7 @@ El PS1 es el motor que ejecuta todas las operaciones sobre Access. Acepta los si
 
 | Parámetro | Tipo | Descripción |
 |---|---|---|
-| `-Action` | `Export\|Import\|Fix-Encoding\|Generate-ERD` | **Obligatorio**. Acción a ejecutar |
+| `-Action` | `Export\|Import\|Fix-Encoding\|Generate-ERD\|List-Objects\|Exists` | **Obligatorio**. Acción a ejecutar |
 | `-AccessPath` | string | Ruta a la BD frontend |
 | `-Password` | string | Contraseña de la BD (default en el script) |
 | `-DestinationRoot` | string | Carpeta raíz de export/import (default: `src`) |
@@ -38,6 +38,7 @@ El PS1 es el motor que ejecuta todas las operaciones sobre Access. Acepta los si
 | `-BackendPath` | string | Ruta al backend `*_Datos.accdb` para Generate-ERD |
 | `-ErdPath` | string | Carpeta de salida del ERD |
 | `-Location` | `Both\|Src\|Access` | Ámbito de Fix-Encoding (default: `Both`) |
+| `-Json` | switch | Salida JSON para `List-Objects` y `Exists` |
 
 ### Acciones
 
@@ -51,6 +52,9 @@ El PS1 es el motor que ejecuta todas las operaciones sobre Access. Acepta los si
 - Sin `-ModuleName`: importa todos los archivos de `src/`
 - Con `-ModuleName A B C`: importa solo los indicados
 - Modo por defecto `-ImportMode Auto`: prioridad `.form.txt` > `.frm` > `.cls` > `.bas`
+- Si existe `.form.txt` de un formulario, `Auto` lo trata como **documento completo** y lo importa completo aunque el cambio original haya sido solo de código
+- Si falla la reconstrucción del header canónico desde Access durante ese import, el proceso **aborta** para no continuar con un header local potencialmente stale
+- Para módulos/clases **nuevos**, la skill intenta primero clonarlos desde un componente persistido del mismo tipo y solo cae al alta desde cero si no existe ninguna semilla disponible
 - `-ImportMode Form`: importa solo layout/formulario (`.form.txt/.frm`)
 - `-ImportMode Code`: importa solo code-behind (`.cls/.bas`)
 - Formularios (`.form.txt`): usa `LoadFromText` — completamente silencioso
@@ -67,29 +71,71 @@ El PS1 es el motor que ejecuta todas las operaciones sobre Access. Acepta los si
 - Detecta backends vinculados no alcanzables y los documenta
 - Autodetecta `*_Datos.accdb` si no se pasa `-BackendPath`
 
+**`List-Objects`** — Lista los objetos reales del frontend:
+- forms
+- reports
+- modules
+- classes
+- documentModules
+
+**`Exists`** — Inspecciona un nombre concreto y devuelve:
+- si existe como objeto Access
+- si existe como VBComponent
+- si es document module
+- el nombre real resuelto
+- el modo recomendado (`import`)
+
 ---
 
 ## Comandos del CLI (cli.js)
 
 El CLI es la interfaz de usuario sobre el PS1. Todos los comandos que expone mapean directamente a acciones del PS1.
 
+### Modelo operativo actual
+
+La skill tiene **dos modos**:
+
+1. **Modo canónico / on-demand (stateless)**  
+   Usar para casi todo:
+   - `import`
+   - `export`
+   - `exists`
+   - `list-objects`
+   - `fix-encoding`
+   - `generate-erd`
+
+   Estos comandos deben funcionar por sí solos, usando los flags actuales (`--access`, `--destination_root`) y **sin depender de una sesión previa**.
+
+2. **Modo sesión / watch (opcional)**  
+   Solo para workflows largos con auto-sync:
+   - `start`
+   - `watch`
+   - `status`
+   - `end`
+
+   Este modo mantiene estado en `.access-vba-skill/session.json` y no debe considerarse el camino normal para imports manuales.
+
 ### Tabla de comandos
 
 | Comando CLI | Acción PS1 | Módulos | Descripción |
 |---|---|---|---|
-| `start` | `Export` | todos | Export inicial + inicia sesión |
-| `watch` | `Import` (auto) | modificados | Auto-sync al detectar cambios en src/ |
+| `start` | `Export` | todos | Export inicial + inicia sesión (modo watch; opcional) |
+| `watch` | `Import` (auto) | modificados | Auto-sync al detectar cambios en src/ (modo sesión) |
 | `export <Mod...>` | `Export` | selectivo | Exporta módulos específicos |
 | `export-all` | `Export` | todos | Exporta todos sin iniciar sesión |
-| `import <Mod...>` | `Import` | selectivo | Importa módulos específicos |
-| `import-form <Mod...>` | `Import` (`ImportMode=Form`) | selectivo | Importa formularios desde `*.form.txt`/`*.frm` (UI + código) |
-| `import-code <Mod...>` | `Import` (`ImportMode=Code`) | selectivo | Importa solo code-behind desde `*.cls`/`*.bas` |
+| `import <Mod...>` | `Import` | selectivo | **Comando canónico**: detecta si cada entrada es módulo, clase o formulario y hace el import correcto |
+| `import-form <Mod...>` | `Import` (`ImportMode=Form`) | selectivo | Importa formularios desde `*.form.txt`/`*.frm` (UI + código) — uso avanzado |
+| `import-code <Mod...>` | `Import` (`ImportMode=Code`) | selectivo | Importa solo code-behind desde `*.cls`/`*.bas`; bloquea crear `Módulo1`/`Módulo2` si el target parece formulario/reporte — uso avanzado |
 | `import-all` | `Import` | todos | Importa todo src/ |
+| `list-objects` | `List-Objects` | — | Lista los objetos reales del frontend; ideal para diagnóstico |
+| `exists <Mod>` | `Exists` | uno | Verifica si un nombre existe realmente en Access/VBA y cómo se resolvió |
 | `sync <Mod...>` | `Import` | selectivo | Alias de import |
 | `fix-encoding [Mod...]` | `Fix-Encoding` | selectivo/todos | Corrige encoding |
 | `generate-erd` | `Generate-ERD` | — | Genera ERD Markdown |
-| `status` | — | — | Muestra estado de sesión |
-| `end` | `Export` (opcional) | todos | Cierra sesión + export final |
+| `status` | — | — | Muestra estado de sesión/watch |
+| `end` | `Export` (opcional) | todos | Cierra sesión/watch + export final |
+
+`import-all` puede hacer varias pasadas internas si detecta fallos por orden de dependencias entre módulos/clases. Si aun así quedan pendientes, termina con error agregado y no reporta falso OK.
 
 ### Ejecución secuencial obligatoria
 
@@ -97,13 +143,11 @@ El CLI es la interfaz de usuario sobre el PS1. Todos los comandos que expone map
 
 - **NUNCA encadenar comandos con `&&` o `;`** — el segundo comando falla porque Access ya fue cerrado por el primero
 - **Ejecutar cada comando en su PROPIA llamada** — esperar el resultado antes de invocar el siguiente
-- **Módulos normales (`import`) primero**, luego formularios (`import-code` o `import-form`) en una sola llamada si son varios
+- **Preferir siempre `import`** como comando único, incluso si la lista mezcla módulos, clases y formularios
 
 ```powershell
-# ✅ Correcto: uno por vez
-node cli.js import NombreModulo --access "MiBD.accdb"
-node cli.js import-code Form_A --access "MiBD.accdb"
-node cli.js import-code Form_B Form_C --access "MiBD.accdb"
+# ✅ Correcto: un solo import canónico, incluso heterogéneo
+node cli.js import NombreModulo ClaseServicio subfrmDatosPCSUB_DictamenRAC --access "MiBD.accdb"
 
 # ❌ Incorrecto: falla en el segundo comando
 node cli.js import NombreModulo --access "MiBD.accdb" && node cli.js import-code Form_A --access "MiBD.accdb"
@@ -115,12 +159,36 @@ node cli.js import NombreModulo --access "MiBD.accdb" && node cli.js import-code
 |---|---|---|
 | `--access <ruta>` | `-AccessPath` | Autodetecta en CWD |
 | `--password <pwd>` | `-Password` | — |
-| `--destination_root <dir>` | `-DestinationRoot` | `src` |
+| `--destination_root <dir>` / `--destination <dir>` | `-DestinationRoot` | `src` |
 | `--location Both\|Src\|Access` | `-Location` | `Both` |
 | `--backend <ruta>` | `-BackendPath` | Autodetecta `*_Datos.accdb` |
 | `--erd_path <dir>` | `-ErdPath` | `docs/ERD` |
+| `--json` | `-Json` | `false` |
 | `--debounce_ms <n>` | — (Node.js) | `600` |
 | `--auto_export_on_end false` | — (Node.js) | `true` |
+
+---
+
+## Introspección del frontend
+
+Cuando una IA dude de si un formulario, subformulario, reporte o módulo existe realmente en el binario, **no debe adivinar**. Debe inspeccionar el frontend.
+
+### Listado completo
+
+```powershell
+node cli.js list-objects --access "CONDOR.accdb" --password dpddpd --json
+```
+
+### Verificación puntual
+
+```powershell
+node cli.js exists subfrmDatosPCSUB_DictamenRAC --access "CONDOR.accdb" --password dpddpd --json
+```
+
+Uso recomendado:
+- si falla un import de formulario/reporte
+- si hay duda entre nombre Access (`subfrmX`) y document module VBA (`Form_subfrmX`)
+- si la IA no sabe si el target existe o no en la BD
 
 ---
 
@@ -143,6 +211,25 @@ src/forms/Form_FormGestion.form.txt
 src/forms/Form_FormGestion.cls
 ```
 
+⚠️ `export` y `export-all` **no escriben en la raíz pelada** del destino.  
+Siempre exportan dentro de subcarpetas tipadas:
+
+- `classes/`
+- `modules/`
+- `forms/`
+
+Ejemplo:
+
+```powershell
+node cli.js export DocumentoServicio --access "CONDOR.accdb" --destination "C:\temp\prueba"
+```
+
+escribirá en:
+
+```text
+C:\temp\prueba\classes\DocumentoServicio.cls
+```
+
 ---
 
 ## Comportamiento de formularios
@@ -153,16 +240,30 @@ Los formularios Access tienen tratamiento especial respecto a módulos y clases:
 - **Import**: `Application.LoadFromText(2, nombreSinPrefixForm_, ruta)`. Nunca usa `VBComponents.Import()`.
 - **Fallback en export**: si `SaveAsText` falla, usa `component.Export()` y registra el aviso.
 - Los formularios también generan un `.cls` paralelo con solo el código VBA para facilitar diff.
+- **Búsqueda automática**: si se pasa `frmNombre` (sin prefijo `Form_`), el sistema busca automáticamente `Form_frmNombre.form.txt`. funciona en ambos sentidos: se puede usar `frmSplash` o `Form_frmSplash`.
 
 ---
 
-## Regla de oro: código en .cls, UI en .form.txt, sync automático
+## Regla de oro: `import` canónico, código en .cls, UI en .form.txt
 
 **Nunca editar el CodeBehind del `.form.txt` directamente.** El flujo correcto es:
 
 1. **CAMBIO DE CÓDIGO VBA** → editar **SOLO el `.cls`**
 2. **CAMBIO DE UI** (propiedades de controles, layout) → editar **SOLO el `.form.txt`**
-3. **Antes de importar** (modo Code o Auto) → el handler sincroniza automáticamente el CodeBehind del `.form.txt` con el contenido del `.cls`
+3. **Antes de importar** (modo Auto/canónico) → si existe `.form.txt`, el handler sincroniza automáticamente el CodeBehind del `.form.txt` con el contenido del `.cls`
+
+### Regla dura de seguridad para `import-code`
+
+Si el `.cls` **parece code-behind de formulario/reporte** pero la skill **no puede resolver un document module existente** dentro de Access, **debe abortar**.
+
+No está permitido hacer fallback a `VBComponents.Import()` en ese caso, porque eso contamina el binario creando módulos espurios como:
+- `Módulo1`
+- `Módulo2`
+
+Si pasa, la acción correcta es:
+- verificar el nombre real del formulario/document module
+- exportar primero el objeto correcto
+- o usar `import` / `import-form` según corresponda
 
 ### Por qué
 
@@ -188,7 +289,7 @@ Para verificar que `.cls` y `CodeBehind` coinciden sin hacer import:
 node cli.js verify-code Form_subfrmDatosCDCA_Generales
 ```
 
-(El comando `verify-code` aún no existe — por ahora verificar manualmente con diff o hacer import-code y confirmar que los cambios aparecen en Access.)
+(El comando `verify-code` aún no existe — por ahora verificar manualmente con diff o hacer `import` y confirmar que los cambios aparecen en Access.)
 
 ---
 

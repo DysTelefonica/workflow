@@ -43,6 +43,23 @@ function moduleNameFromFile(filePath) {
   return path.basename(filePath, path.extname(filePath));
 }
 
+function logicalModuleNameVariants(moduleName) {
+  const raw = String(moduleName || "").trim();
+  const base = raw.replace(/^(Form|Report)_/i, "");
+  const out = [];
+  const push = (value) => {
+    const v = String(value || "").trim();
+    if (!v || out.includes(v)) return;
+    out.push(v);
+  };
+
+  push(raw);
+  push(base);
+  push(`Form_${base}`);
+  push(`Report_${base}`);
+  return out;
+}
+
 function isVbaMetadataLine(line) {
   const trim = String(line || "").trim();
   if (!trim) return false;
@@ -112,6 +129,155 @@ function sanitizeVbaImportText(text) {
   return out.join("\r\n");
 }
 
+function preferredNewline(text) {
+  return String(text || "").includes("\r\n") ? "\r\n" : "\n";
+}
+
+function normalizeNewlines(text, newline = "\n") {
+  return String(text || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/\n/g, newline);
+}
+
+function splitCodeBehindSection(text) {
+  const normalized = normalizeNewlines(text, "\n");
+  const match = /^([ \t]*CodeBehind\w*[^\r\n]*)(?:\n|$)/im.exec(normalized);
+  if (!match || match.index == null) return null;
+
+  const start = match.index;
+  const markerLine = match[1];
+  const markerEnd = start + match[0].length;
+
+  return {
+    before: normalized.slice(0, start),
+    markerLine,
+    body: normalized.slice(markerEnd)
+  };
+}
+
+function splitVbaMetadataHeaderText(text) {
+  const normalized = normalizeNewlines(text, "\n");
+  const lines = normalized.split("\n");
+  if (lines.length > 0 && lines[0].charCodeAt(0) === 0xfeff) {
+    lines[0] = lines[0].slice(1);
+  }
+
+  const header = [];
+  let index = 0;
+  while (index < lines.length) {
+    const line = lines[index];
+    const trim = String(line || "").trim();
+    if (!trim || isVbaMetadataLine(line) || isVbaOptionDirectiveLine(line)) {
+      header.push(line);
+      index += 1;
+      continue;
+    }
+    break;
+  }
+
+  while (header.length > 0 && !String(header[header.length - 1] || "").trim()) {
+    header.pop();
+  }
+
+  let bodyLines = lines.slice(index);
+  while (bodyLines.length > 0 && !String(bodyLines[0] || "").trim()) {
+    bodyLines.shift();
+  }
+
+  return {
+    header: header.join("\n"),
+    body: bodyLines.join("\n")
+  };
+}
+
+function joinCodeBehindBodyText(header, body, newline) {
+  const parts = [];
+  const normalizedHeader = normalizeNewlines(header, "\n").replace(/\n+$/g, "");
+  const normalizedBody = normalizeNewlines(body, "\n").replace(/^\n+/g, "");
+
+  if (normalizedHeader) parts.push(normalizedHeader);
+  if (normalizedBody) parts.push(normalizedBody);
+
+  return parts.join("\n").replace(/\n/g, newline);
+}
+
+function mergeDocumentCodeBehindText(documentText, clsText) {
+  const newline = preferredNewline(documentText) || "\r\n";
+  const section = splitCodeBehindSection(documentText);
+  if (!section) {
+    throw new Error("No se encontró ningún marcador CodeBehind* en el documento.");
+  }
+
+  const sanitizedCls = sanitizeVbaImportText(clsText);
+  const documentCode = splitVbaMetadataHeaderText(section.body);
+  const clsCode = splitVbaMetadataHeaderText(sanitizedCls);
+  const effectiveHeader = documentCode.header || clsCode.header;
+  const mergedBody = joinCodeBehindBodyText(effectiveHeader, clsCode.body, newline);
+  const normalizedBefore = normalizeNewlines(section.before, newline);
+
+  return normalizedBefore + section.markerLine + newline + mergedBody;
+}
+
+function countMeaningfulVbaBodyLines(text) {
+  const parts = splitVbaMetadataHeaderText(sanitizeVbaImportText(text || ""));
+  const bodyLines = String(parts.body || "")
+    .split(/\r?\n/)
+    .map((line) => String(line || "").trim())
+    .filter((line) => line && !line.startsWith("'"));
+  return bodyLines.length;
+}
+
+function normalizedMeaningfulVbaBody(text) {
+  const parts = splitVbaMetadataHeaderText(sanitizeVbaImportText(text || ""));
+  return String(parts.body || "")
+    .split(/\r?\n/)
+    .map((line) => String(line || "").trim())
+    .filter((line) => line && !line.startsWith("'"))
+    .join("\n");
+}
+
+function pickBestDocumentClsPath(candidates) {
+  const existing = uniq((candidates || []).filter(Boolean)).filter((candidate) => fs.existsSync(candidate));
+  if (existing.length === 0) return { clsPath: null, warning: null, error: null };
+  if (existing.length === 1) return { clsPath: existing[0], warning: null, error: null };
+
+  const scored = existing.map((candidate) => {
+    let content = "";
+    try {
+      content = fs.readFileSync(candidate, "utf8");
+    } catch {}
+    return {
+      path: candidate,
+      meaningfulLines: countMeaningfulVbaBodyLines(content),
+      normalizedBody: normalizedMeaningfulVbaBody(content)
+    };
+  });
+
+  scored.sort((a, b) => b.meaningfulLines - a.meaningfulLines);
+  const best = scored[0];
+  const fallback = scored[1];
+  const meaningful = scored.filter((item) => item.meaningfulLines > 0);
+
+  if (meaningful.length > 1) {
+    const distinctBodies = new Set(meaningful.map((item) => item.normalizedBody));
+    if (distinctBodies.size > 1) {
+      return {
+        clsPath: null,
+        warning: null,
+        error: `⚠️  Ambigüedad: existen varios .cls con código distinto para el mismo documento (${meaningful.map((item) => path.basename(item.path)).join(", ")}). Unificá el code-behind antes de importar.`
+      };
+    }
+  }
+
+  if (fallback && best.meaningfulLines > 0 && fallback.meaningfulLines === 0) {
+    return {
+      clsPath: best.path,
+      warning: `⚠️  Se eligió ${path.basename(best.path)} porque ${path.basename(fallback.path)} está vacío o casi vacío.`,
+      error: null
+    };
+  }
+
+  return { clsPath: best.path, warning: null, error: null };
+}
+
 class AccessVbaSyncSkill {
   constructor(options = {}) {
     this.skillDir = options.skillDir || __dirname;
@@ -154,7 +320,9 @@ class AccessVbaSyncSkill {
       const raw = await fsp.readFile(this.stateFile, "utf8");
       const parsed = JSON.parse(raw);
       this.session = Object.assign({}, this.session, parsed);
-    } catch {
+    } catch (err) {
+      if (err && err.code === "ENOENT") return;
+      console.warn(`WARN: no se pudo cargar session.json (${this.stateFile}): ${err && err.message ? err.message : String(err)}`);
       return;
     }
   }
@@ -252,7 +420,58 @@ class AccessVbaSyncSkill {
     console.log(`📁 modulesPath: ${modulesPath}`);
   }
 
-  runVbaManager({ action, accessPath, destinationRootAbs, moduleNames = [], backendPath, erdPath, location, importMode }) {
+  async resolveCommandContext({ accessPath, initializeIfNeeded = false, allowSessionMutation = false } = {}) {
+    await this.ensureReady();
+    await this.loadSessionFromDisk();
+
+    const requestedAccessPath = accessPath || null;
+    if (!this.session.active && initializeIfNeeded) {
+      await this.initializeSession({ accessPath: requestedAccessPath, performInitialExport: false });
+      await this.loadSessionFromDisk();
+    }
+
+    const destinationRootAbs = this.resolveDestinationRoot();
+    let dbPath = requestedAccessPath || this.session.accessPath || null;
+    if (!dbPath) {
+      dbPath = await this.detectAccessPath({ accessPath: requestedAccessPath });
+    }
+    if (!dbPath) throw new Error("No hay BD detectada para esta operación.");
+
+    const modulesPath = this.modulesPathFor(dbPath, destinationRootAbs);
+
+    const needsSessionUpdate =
+      allowSessionMutation &&
+      this.session.active &&
+      (
+        this.session.accessPath !== dbPath ||
+        this.session.destinationRoot !== destinationRootAbs ||
+        this.session.modulesPath !== modulesPath
+      );
+
+    if (needsSessionUpdate) {
+      this.session.accessPath = dbPath;
+      this.session.destinationRoot = destinationRootAbs;
+      this.session.modulesPath = modulesPath;
+      await this.saveSessionToDisk();
+    }
+
+    return {
+      accessPath: dbPath,
+      destinationRootAbs,
+      modulesPath
+    };
+  }
+
+  async recordSessionImport(mods) {
+    if (!this.session.active) return;
+    const now = new Date().toISOString();
+    this.session.lastSyncAt = now;
+    this.session.changedModules = uniq([...(this.session.changedModules || []), ...(mods || [])]);
+    this.session.pendingModules = [];
+    await this.saveSessionToDisk();
+  }
+
+  runVbaManager({ action, accessPath, destinationRootAbs, moduleNames = [], backendPath, erdPath, location, importMode, json = false }) {
     return new Promise((resolve, reject) => {
       const exe = powershellExe();
       const args = [
@@ -283,12 +502,14 @@ class AccessVbaSyncSkill {
         args.push("-ImportMode", importMode);
       }
 
-      // FIX: pasar ModuleName como string unico separado por comas.
-      // PowerShell convierte automaticamente "A,B,C" en [string[]]{"A","B","C"}
-      // cuando el parametro destino es [string[]].
-      // Esto evita toda ambiguedad posicional con otros parametros como -Location.
+      if (json) {
+        args.push("-Json");
+      }
+
+      // Pasar los nombres como JSON evita romper módulos válidos con comas
+      // y elimina la ambigüedad posicional del binding de PowerShell.
       if (Array.isArray(moduleNames) && moduleNames.length > 0) {
-        args.push("-ModuleName", moduleNames.join(","));
+        args.push("-ModuleNamesJson", JSON.stringify(moduleNames));
       }
 
       if (this.password) {
@@ -336,57 +557,96 @@ class AccessVbaSyncSkill {
     await this.initializeSession({ accessPath, performInitialExport: true });
   }
 
+  resolveDocumentArtifacts(moduleName) {
+    const variants = logicalModuleNameVariants(moduleName);
+    const folders = [
+      { root: path.join(this.projectRoot, this.destinationRoot, "forms"), textExt: ".form.txt" },
+      { root: path.join(this.projectRoot, this.destinationRoot, "reports"), textExt: ".report.txt" }
+    ];
+
+    for (const folder of folders) {
+      for (const variant of variants) {
+        const textPath = path.join(folder.root, variant + folder.textExt);
+        if (!fs.existsSync(textPath)) continue;
+
+        const clsCandidates = [
+          path.join(folder.root, variant + ".cls"),
+          path.join(folder.root, String(variant).replace(/^(Form|Report)_/i, "") + ".cls")
+        ];
+        const clsResolution = pickBestDocumentClsPath(clsCandidates);
+
+        return {
+          moduleName,
+          textPath,
+          clsPath: clsResolution.clsPath,
+          kind: folder.textExt === ".report.txt" ? "report" : "form",
+          clsWarning: clsResolution.warning,
+          clsError: clsResolution.error
+        };
+      }
+    }
+
+    return null;
+  }
+
   async syncCodeBehind(moduleNames) {
-    const fs = require("fs");
-    const path = require("path");
-    const formsRoot = path.join(this.projectRoot, this.destinationRoot, "forms");
-    
     const mods = uniq((moduleNames || []).map(String).filter(Boolean));
     let synced = 0;
     
     for (const mod of mods) {
-      const clsPath = path.join(formsRoot, mod + ".cls");
-      const formPath = path.join(formsRoot, mod + ".form.txt");
-      
-      if (!fs.existsSync(clsPath) || !fs.existsSync(formPath)) continue;
+      const artifacts = this.resolveDocumentArtifacts(mod);
+      if (!artifacts || !artifacts.clsPath || !artifacts.textPath) continue;
+      if (artifacts.clsError) {
+        throw new Error(artifacts.clsError);
+      }
+      if (artifacts.clsWarning) {
+        console.log(`  ${artifacts.clsWarning}`);
+      }
       
       let formContent;
       try {
-        formContent = fs.readFileSync(formPath, "utf8");
+        formContent = fs.readFileSync(artifacts.textPath, "utf8");
       } catch { continue; }
-      
-      const cbIndex = formContent.indexOf("CodeBehind");
-      if (cbIndex === -1) continue;
-      
+
       let clsContent;
       try {
-        clsContent = fs.readFileSync(clsPath, "utf8");
+        clsContent = fs.readFileSync(artifacts.clsPath, "utf8");
       } catch { continue; }
-      clsContent = sanitizeVbaImportText(clsContent);
-      
-      const uiPart = formContent.substring(0, cbIndex);
-      const newFormContent = uiPart + "CodeBehind\r\n" + clsContent;
-      
-      fs.writeFileSync(formPath, newFormContent, "utf8");
-      console.log(`  🔄 Sincronizado CodeBehind: ${mod}.form.txt`);
+
+      const newFormContent = mergeDocumentCodeBehindText(formContent, clsContent);
+
+      fs.writeFileSync(artifacts.textPath, newFormContent, "utf8");
+      console.log(`  🔄 Sincronizado CodeBehind: ${path.basename(artifacts.textPath)}`);
       synced++;
     }
-    
+
     return synced;
   }
 
-  async importModules({ moduleNames, accessPath, importMode = "Auto" } = {}) {
-    await this.ensureReady();
-    await this.loadSessionFromDisk();
+  async syncAllDocumentCodeBehind() {
+    const folders = [
+      path.join(this.projectRoot, this.destinationRoot, "forms"),
+      path.join(this.projectRoot, this.destinationRoot, "reports")
+    ];
+    const modules = [];
 
-    if (!this.session.active) {
-      await this.initializeSession({ accessPath, performInitialExport: false });
-      await this.loadSessionFromDisk();
+    for (const folder of folders) {
+      if (!fs.existsSync(folder)) continue;
+      for (const entry of fs.readdirSync(folder, { withFileTypes: true })) {
+        if (!entry.isFile()) continue;
+        const lower = entry.name.toLowerCase();
+        if (!(lower.endsWith(".form.txt") || lower.endsWith(".report.txt"))) continue;
+        modules.push(entry.name.replace(/(\.form|\.report)\.txt$/i, ""));
+      }
     }
 
-    const destinationRootAbs = this.session.destinationRoot || this.resolveDestinationRoot();
-    const dbPath = this.session.accessPath || (await this.detectAccessPath({ accessPath }));
-    if (!dbPath) throw new Error("No hay BD detectada para importar.");
+    return this.syncCodeBehind(modules);
+  }
+
+  async importModules({ moduleNames, accessPath, importMode = "Auto", trackSession = false } = {}) {
+    const context = await this.resolveCommandContext({ accessPath, initializeIfNeeded: trackSession, allowSessionMutation: trackSession });
+    const destinationRootAbs = context.destinationRootAbs;
+    const dbPath = context.accessPath;
 
     const mods = uniq((moduleNames || []).map(String).filter(Boolean));
     if (mods.length === 0) throw new Error("No se especificaron módulos para importar.");
@@ -422,11 +682,9 @@ class AccessVbaSyncSkill {
       }
     }
 
-    const now = new Date().toISOString();
-    this.session.lastSyncAt = now;
-    this.session.changedModules = uniq([...(this.session.changedModules || []), ...mods]);
-    this.session.pendingModules = [];
-    await this.saveSessionToDisk();
+    if (trackSession) {
+      await this.recordSessionImport(mods);
+    }
 
     console.log("✅ Sync terminado.");
     console.log("Abre Access → VBE → Debug → Compile");
@@ -471,7 +729,7 @@ class AccessVbaSyncSkill {
 
     this.importing = true;
     try {
-      await this.importModules({ moduleNames: ready });
+      await this.importModules({ moduleNames: ready, trackSession: true });
       const doneAt = Date.now();
       for (const m of ready) this.lastImportedAtByModule.set(m, doneAt);
     } finally {
@@ -484,7 +742,9 @@ class AccessVbaSyncSkill {
     if (this.debounceTimer) clearTimeout(this.debounceTimer);
 
     this.session.pendingModules = uniq([...(this.session.pendingModules || []), ...this.pendingModules]);
-    this.saveSessionToDisk().catch(() => {});
+    this.saveSessionToDisk().catch((err) => {
+      console.warn(`WARN: no se pudo guardar session.json (${this.stateFile}): ${err && err.message ? err.message : String(err)}`);
+    });
 
     this.debounceTimer = setTimeout(async () => {
       this.debounceTimer = null;
@@ -617,7 +877,7 @@ class AccessVbaSyncSkill {
 
     if (pending.length > 0) {
       console.log(`🔄 Sync final de pendientes: ${pending.join(", ")}`);
-      await this.importModules({ moduleNames: pending });
+      await this.importModules({ moduleNames: pending, trackSession: true });
     }
 
     if (this.autoExportOnEnd) {
@@ -643,12 +903,9 @@ class AccessVbaSyncSkill {
   }
 
   async fixEncoding({ moduleNames, accessPath, location = "Both" } = {}) {
-    await this.ensureReady();
-    await this.loadSessionFromDisk();
-
-    const destinationRootAbs = this.session.destinationRoot || this.resolveDestinationRoot();
-    const dbPath = this.session.accessPath || (await this.detectAccessPath({ accessPath }));
-    if (!dbPath) throw new Error("No hay BD detectada para fix-encoding.");
+    const context = await this.resolveCommandContext({ accessPath, initializeIfNeeded: false, allowSessionMutation: false });
+    const destinationRootAbs = context.destinationRootAbs;
+    const dbPath = context.accessPath;
 
     const mods = moduleNames && moduleNames.length > 0
       ? uniq(moduleNames.map(String).filter(Boolean))
@@ -669,17 +926,9 @@ class AccessVbaSyncSkill {
   }
 
   async exportModules({ moduleNames, accessPath } = {}) {
-    await this.ensureReady();
-    await this.loadSessionFromDisk();
-
-    if (!this.session.active) {
-      await this.initializeSession({ accessPath, performInitialExport: false });
-      await this.loadSessionFromDisk();
-    }
-
-    const destinationRootAbs = this.session.destinationRoot || this.resolveDestinationRoot();
-    const dbPath = this.session.accessPath || (await this.detectAccessPath({ accessPath }));
-    if (!dbPath) throw new Error("No hay BD detectada para exportar.");
+    const context = await this.resolveCommandContext({ accessPath, initializeIfNeeded: false, allowSessionMutation: false });
+    const destinationRootAbs = context.destinationRootAbs;
+    const dbPath = context.accessPath;
 
     const mods = uniq((moduleNames || []).map(String).filter(Boolean));
     if (mods.length === 0) throw new Error("No se especificaron módulos para exportar.");
@@ -697,13 +946,9 @@ class AccessVbaSyncSkill {
   }
 
   async exportAll({ accessPath } = {}) {
-    await this.ensureReady();
-    await this.loadSessionFromDisk();
-
-    const detectedAccess = await this.detectAccessPath({ accessPath });
-    if (!detectedAccess) throw new Error("No hay BD detectada para exportar.");
-
-    const destinationRootAbs = this.session.destinationRoot || this.resolveDestinationRoot();
+    const context = await this.resolveCommandContext({ accessPath, initializeIfNeeded: false, allowSessionMutation: false });
+    const detectedAccess = context.accessPath;
+    const destinationRootAbs = context.destinationRootAbs;
 
     console.log("📤 Exportando todos los módulos...");
     await this.runVbaManager({
@@ -715,18 +960,11 @@ class AccessVbaSyncSkill {
   }
 
   async importAll({ accessPath } = {}) {
-    await this.ensureReady();
-    await this.loadSessionFromDisk();
+    const context = await this.resolveCommandContext({ accessPath, initializeIfNeeded: false, allowSessionMutation: false });
+    const destinationRootAbs = context.destinationRootAbs;
+    const dbPath = context.accessPath;
 
-    if (!this.session.active) {
-      await this.initializeSession({ accessPath, performInitialExport: false });
-      await this.loadSessionFromDisk();
-    }
-
-    const destinationRootAbs = this.session.destinationRoot || this.resolveDestinationRoot();
-    const dbPath = this.session.accessPath || (await this.detectAccessPath({ accessPath }));
-    if (!dbPath) throw new Error("No hay BD detectada para importar.");
-
+    await this.syncAllDocumentCodeBehind();
     console.log("📥 Importando todos los módulos desde src/...");
     await this.runVbaManager({
       action: "Import",
@@ -741,8 +979,7 @@ class AccessVbaSyncSkill {
   async generateErd({ backendPath, erdPath } = {}) {
     await this.ensureReady();
     await this.loadSessionFromDisk();
-
-    const destinationRootAbs = this.session.destinationRoot || this.resolveDestinationRoot();
+    const destinationRootAbs = this.resolveDestinationRoot();
 
     console.log("📊 Generando ERD...");
     await this.runVbaManager({
@@ -753,6 +990,48 @@ class AccessVbaSyncSkill {
       erdPath
     });
     console.log("✅ ERD Generado.");
+  }
+
+  async listObjects({ accessPath, json = false } = {}) {
+    const context = await this.resolveCommandContext({ accessPath, initializeIfNeeded: false, allowSessionMutation: false });
+    const destinationRootAbs = context.destinationRootAbs;
+    const dbPath = context.accessPath;
+
+    const result = await this.runVbaManager({
+      action: "List-Objects",
+      accessPath: dbPath,
+      destinationRootAbs,
+      json
+    });
+
+    if (json) {
+      return JSON.parse(String(result.stdout || "").trim());
+    }
+
+    process.stdout.write(result.stdout || "");
+    return null;
+  }
+
+  async exists({ moduleName, accessPath, json = false } = {}) {
+    const context = await this.resolveCommandContext({ accessPath, initializeIfNeeded: false, allowSessionMutation: false });
+    const destinationRootAbs = context.destinationRootAbs;
+    const dbPath = context.accessPath;
+    if (!moduleName) throw new Error("Falta moduleName para exists.");
+
+    const result = await this.runVbaManager({
+      action: "Exists",
+      accessPath: dbPath,
+      destinationRootAbs,
+      moduleNames: [moduleName],
+      json
+    });
+
+    if (json) {
+      return JSON.parse(String(result.stdout || "").trim());
+    }
+
+    process.stdout.write(result.stdout || "");
+    return null;
   }
 
   async status() {

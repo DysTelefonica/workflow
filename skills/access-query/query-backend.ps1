@@ -356,6 +356,94 @@ function Get-LinkedTableNames {
     return $linked
 }
 
+function New-DaoDbEngine {
+    try {
+        return New-Object -ComObject DAO.DBEngine.120
+    } catch {
+        throw "No se pudo crear DAO.DBEngine.120. Asegurate de tener Access Database Engine instalado."
+    }
+}
+
+function Get-DaoOpenConnect {
+    param([string]$Pw)
+    if ([string]::IsNullOrEmpty($Pw)) { return '' }
+    return ";PWD=$Pw"
+}
+
+function Get-ConnectValue {
+    param(
+        [string]$ConnectString,
+        [string]$Key
+    )
+    if ([string]::IsNullOrWhiteSpace($ConnectString) -or [string]::IsNullOrWhiteSpace($Key)) { return $null }
+    $match = [regex]::Match($ConnectString, ('(?i)(?:^|;){0}=([^;]*)' -f [regex]::Escape($Key)))
+    if ($match.Success) { return $match.Groups[1].Value }
+    return $null
+}
+
+function Get-ConnectDatabasePath {
+    param([string]$ConnectString)
+    $dbPath = Get-ConnectValue -ConnectString $ConnectString -Key 'DATABASE'
+    if ([string]::IsNullOrWhiteSpace($dbPath)) { return $null }
+    try {
+        return [System.IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables($dbPath))
+    } catch {
+        return $dbPath
+    }
+}
+
+function Get-LinkedTableDetails {
+    param(
+        [string]$Path,
+        [string]$Pw
+    )
+
+    $dbEngine = $null
+    $db = $null
+    try {
+        $dbEngine = New-DaoDbEngine
+        $db = $dbEngine.OpenDatabase($Path, $false, $true, (Get-DaoOpenConnect -Pw $Pw))
+        $linked = New-Object System.Collections.Generic.List[object]
+
+        foreach ($td in $db.TableDefs) {
+            $tableName = ''
+            $connect = ''
+            $sourceTableName = ''
+
+            try { $tableName = [string]$td.Name } catch {}
+            if ([string]::IsNullOrWhiteSpace($tableName) -or $tableName.StartsWith('MSys', [System.StringComparison]::OrdinalIgnoreCase)) { continue }
+
+            try { $connect = [string]$td.Connect } catch {}
+            if ([string]::IsNullOrWhiteSpace($connect)) { continue }
+
+            try { $sourceTableName = [string]$td.SourceTableName } catch {}
+
+            $backendPath = Get-ConnectDatabasePath -ConnectString $connect
+            $pwdPresent = -not [string]::IsNullOrWhiteSpace((Get-ConnectValue -ConnectString $connect -Key 'PWD'))
+
+            $linked.Add([pscustomobject]@{
+                name          = $tableName
+                sourceTable   = $sourceTableName
+                backendPath   = $backendPath
+                connect       = $connect
+                passwordInLink = $pwdPresent
+            }) | Out-Null
+        }
+
+        return @($linked)
+    } finally {
+        if ($db -and $db -is [System.__ComObject]) {
+            try { $db.Close() } catch {}
+            [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($db)
+        }
+        if ($dbEngine -and $dbEngine -is [System.__ComObject]) {
+            [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($dbEngine)
+        }
+        [GC]::Collect()
+        [GC]::WaitForPendingFinalizers()
+    }
+}
+
 function Extract-TableNames {
     param([string]$SqlText, [switch]$WriteTargetsOnly)
     $tables = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
@@ -647,18 +735,31 @@ if ($Mode -eq 'ListTables') {
 # ---- LinkedTables ----
 if ($Mode -eq 'LinkedTables') {
     $t = Get-BackendPath -Name $Backend -OverridePath $BackendPath
-    $conn = Get-Connection -Path $t.Path -Pw $t.Password
-    $all = $conn.GetSchema('Tables')
-    $linked = @($all | Where-Object { $_.Item('TABLE_TYPE') -eq 'LINK' } | ForEach-Object {
-        @{ name = $_.Item('TABLE_NAME'); origin = $_.Item('TABLE_DESCRIPTION') }
-    })
-    $conn.Close()
+    try {
+        $linked = @(Get-LinkedTableDetails -Path $t.Path -Pw $t.Password)
+    } catch {
+        Write-Host "ERROR: $($_.Exception.Message)" -ForegroundColor Red
+        exit 1
+    }
     if ($Json) {
         @{ mode = 'LinkedTables'; backend = $t.Name; tables = $linked } | ConvertTo-Json -Depth 3 | Write-Output
     } else {
         Write-Host "=== TABLAS LINKED en $($t.Name) ($($linked.Count)) ===" -ForegroundColor Cyan
         if ($linked.Count -eq 0) { Write-Host '  (ninguna)' -ForegroundColor Gray }
-        else { $linked | ForEach-Object { Write-Host "  $($_.name)" -ForegroundColor Yellow; Write-Host "    -> $($_.origin)" -ForegroundColor Gray } }
+        else {
+            $linked | ForEach-Object {
+                Write-Host "  $($_.name)" -ForegroundColor Yellow
+                if (-not [string]::IsNullOrWhiteSpace($_.sourceTable)) {
+                    Write-Host "    sourceTable : $($_.sourceTable)" -ForegroundColor Gray
+                }
+                if (-not [string]::IsNullOrWhiteSpace($_.backendPath)) {
+                    Write-Host "    backendPath : $($_.backendPath)" -ForegroundColor Gray
+                }
+                if (-not [string]::IsNullOrWhiteSpace($_.connect)) {
+                    Write-Host "    connect     : $($_.connect)" -ForegroundColor DarkGray
+                }
+            }
+        }
     }
     exit 0
 }

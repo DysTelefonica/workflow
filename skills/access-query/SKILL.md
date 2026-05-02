@@ -58,7 +58,7 @@ Si la tarea mezcla **código VBA/UI** y **datos backend**, usar:
 | Quiero... | Usar |
 |---|---|
 | Ver tablas locales | `-ListTables` |
-| Ver tablas linked | `-LinkedTables` |
+| Ver tablas linked (tabla local, source table, backend destino y connect) | `-LinkedTables` |
 | Ver columnas de una tabla | `-GetSchema -Table TbX` |
 | Hacer un SELECT libre | `-SQL "SELECT ..."` |
 | Contar filas | `-Count -Table TbX` |
@@ -152,6 +152,9 @@ powershell -File "%USERPROFILE%\.config\opencode\skills\access-query\query-backe
 
 # Linked tables
 powershell -File "%USERPROFILE%\.config\opencode\skills\access-query\query-backend.ps1" -BackendPath ".\backend\datos.accdb" -LinkedTables
+
+# Linked tables en JSON detallado
+powershell -File "%USERPROFILE%\.config\opencode\skills\access-query\query-backend.ps1" -BackendPath ".\backend\datos.accdb" -LinkedTables -Json
 
 # Esquema
 powershell -File "%USERPROFILE%\.config\opencode\skills\access-query\query-backend.ps1" -BackendPath ".\backend\datos.accdb" -GetSchema -Table "TbSolicitudes"
