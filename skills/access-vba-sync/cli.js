@@ -18,7 +18,15 @@ function parseArgs(argv) {
   for (let i = 1; i < args.length; i++) {
     const a = args[i];
     if (a.startsWith("--")) {
-      const key = a.slice(2);
+      const raw = a.slice(2);
+      const eqIndex = raw.indexOf("=");
+      if (eqIndex >= 0) {
+        const key = raw.slice(0, eqIndex);
+        out.flags[key] = raw.slice(eqIndex + 1);
+        continue;
+      }
+
+      const key = raw;
       const val = args[i + 1];
       if (val == null || val.startsWith("--")) {
         out.flags[key] = true;
@@ -32,6 +40,12 @@ function parseArgs(argv) {
   }
 
   return out;
+}
+
+function ensureFlagHasValue(flags, key) {
+  if (flags[key] === true) {
+    throw new Error(`--${key} requiere un valor.`);
+  }
 }
 
 function toBoolFlag(v, defaultValue) {
@@ -62,9 +76,13 @@ function printHelp() {
       "  node cli.js import-all     [--access <ruta>] [--destination_root <dir>] [--password <pwd>]",
       "  node cli.js list-objects   [--access <ruta>] [--password <pwd>] [--json]",
       "  node cli.js exists <Mod>   [--access <ruta>] [--password <pwd>] [--json]",
+      "  node cli.js compile-vba    [--access <ruta>] [--password <pwd>] [--json]",
+      "  node cli.js run-vba <Proc> [--access <ruta>] [--args-json <json-array>] [--password <pwd>] [--json]",
+      "  node cli.js test-vba       [<Proc>|--procedure <Proc>] [--access <ruta>] [--tests <ruta>] [--filter <texto>] [--no-compile] [--json]",
       "  node cli.js sync    <Mod..>[--access <ruta>] [--destination_root <dir>] [--password <pwd>]",
       "  node cli.js fix-encoding   [--access <ruta>] [--destination_root <dir>] [--password <pwd>] [--location Both|Src|Access] [<Mod...>]",
       "  node cli.js generate-erd   [--backend <ruta>] [--erd_path <dir>] [--password <pwd>]",
+      "  node cli.js verify-code [<Mod...>]",
       "  node cli.js status",
       "  node cli.js end            [--auto_export_on_end false]",
       "",
@@ -79,15 +97,19 @@ function printHelp() {
       "  import-all       Importa todos los módulos de src/ hacia la BD",
       "  list-objects     Lista forms, reports, modules, classes y document modules del frontend",
       "  exists <Mod>     Indica si existe realmente en Access/VBA y cómo se resolvió",
+      "  compile-vba      Compila el proyecto VBA y reporta fase/ubicación si falla",
+      "  run-vba <Proc>   Ejecuta una función/sub pública mediante Access.Application.Run",
+      "  test-vba         Runner externo TDD: compila y ejecuta tests declarados en JSON",
       "  sync    <Mod..>  Alias de import",
       "  fix-encoding     Corrige encoding (ANSI→UTF-8 sin BOM) en src/, en la BD, o en ambos",
       "                   Sin módulos: procesa todos. Con módulos: solo los indicados.",
       "  generate-erd     Genera documentación de estructura de tablas en Markdown",
+      "  verify-code [Mod..] Compara .cls con CodeBehind del .form.txt (diff sin importar). Sin módulos: verifica todos.",
       "  status           Muestra el estado de la sesión/watch activa",
       "  end              Cierra la sesión/watch y restaura la configuración de Access",
       "",
       "Flags comunes:",
-      "  --access <ruta>              Ruta .accdb/.accde/.mdb/.mde (relativa a CWD o absoluta)",
+      "  --access <ruta>              Ruta .accdb/.accde/.mdb/.mde en el CWD del CLI",
       "  --password <pwd>             Contraseña de la BD si está protegida",
       "  --destination_root <dir>     Carpeta de export/import (default: src)",
       "  --destination <dir>          Alias de --destination_root",
@@ -98,7 +120,13 @@ function printHelp() {
       "  --location Both|Src|Access   Para fix-encoding: dónde aplicar (default: Both)",
       "  --backend <ruta>             Para generate-erd: ruta al backend _Datos.accdb",
       "  --erd_path <dir>             Para generate-erd: carpeta de salida (default: docs/ERD)",
-      "  --json                       Salida JSON para exists/list-objects"
+      "  --args-json <json-array>     Para run-vba: argumentos simples en array JSON",
+      "  --tests <ruta>               Para test-vba: archivo JSON de plan (default: tests.vba.json)",
+      "  --procedure <Proc>           Para test-vba: ejecuta un procedimiento público sin tests.vba.json",
+      "  --filter <texto>             Para test-vba: filtra por nombre/procedimiento/tag",
+      "  --no-compile                 Para test-vba: salta compile gate",
+      "  --allow-startup-execution    Avanzado: permite abrir aunque no se pueda deshabilitar AutoExec/StartupForm",
+      "  --json                       Salida JSON para exists/list-objects/compile-vba/run-vba/test-vba"
     ].join("\n")
   );
 }
@@ -111,6 +139,10 @@ async function main() {
     return;
   }
 
+  for (const key of ["access", "destination_root", "destination", "password", "debounce_ms", "location", "backend", "erd_path", "args-json", "args_json", "tests", "procedure", "proc", "filter"]) {
+    ensureFlagHasValue(flags, key);
+  }
+
   const destinationRootFlag = flags.destination_root || flags.destination || "src";
 
   const skill = new AccessVbaSyncSkill({
@@ -119,7 +151,8 @@ async function main() {
     destinationRoot: destinationRootFlag,
     debounceMs: Number.isFinite(Number(flags.debounce_ms)) ? Number(flags.debounce_ms) : 600,
     autoExportOnEnd: toBoolFlag(flags.auto_export_on_end, true),
-    password: flags.password || null
+    password: flags.password || null,
+    allowStartupExecution: toBoolFlag(flags["allow-startup-execution"] || flags.allow_startup_execution, false)
   });
 
   const accessPath = normalizePathFlag(flags.access);
@@ -130,6 +163,11 @@ async function main() {
   }
 
   if (command === "watch") {
+    try {
+      require.resolve("chokidar");
+    } catch {
+      throw new Error("chokidar no está disponible. Instalá dependencias del skill antes de usar watch.");
+    }
     await skill.watch({ accessPath });
     return;
   }
@@ -194,7 +232,7 @@ async function main() {
 
   if (command === "exists") {
     if (mods.length !== 1) {
-      console.error("exists requiere exactamente un nombre. Ejemplo: node cli.js exists subfrmDatosPCSUB_DictamenRAC");
+      console.error(`exists requiere exactamente 1 nombre; recibiste ${mods.length}. Ejemplo: node cli.js exists subfrmDatosPCSUB_DictamenRAC`);
       process.exitCode = 1;
       return;
     }
@@ -202,6 +240,59 @@ async function main() {
     if (toBoolFlag(flags.json, false)) {
       console.log(JSON.stringify(result, null, 2));
     }
+    return;
+  }
+
+  if (command === "compile-vba") {
+    const result = await skill.compileVba({ accessPath, json: toBoolFlag(flags.json, false) });
+    if (toBoolFlag(flags.json, false)) {
+      console.log(JSON.stringify(result, null, 2));
+    }
+    if (result && result.ok === false) process.exitCode = 1;
+    return;
+  }
+
+  if (command === "run-vba") {
+    if (mods.length !== 1) {
+      console.error(`run-vba requiere exactamente 1 procedimiento público; recibiste ${mods.length}. Ejemplo: node cli.js run-vba Test_CalculaTotal --args-json "[42]" --json`);
+      process.exitCode = 1;
+      return;
+    }
+    const result = await skill.runVba({
+      procedureName: mods[0],
+      argsJson: flags["args-json"] !== undefined ? flags["args-json"] : flags.args_json,
+      accessPath,
+      json: toBoolFlag(flags.json, false)
+    });
+    if (toBoolFlag(flags.json, false)) {
+      console.log(JSON.stringify(result, null, 2));
+    }
+    if (result && result.ok === false) process.exitCode = 1;
+    return;
+  }
+
+  if (command === "test-vba") {
+    const procedure = flags.procedure || flags.proc || (mods.length === 1 ? mods[0] : null);
+    if (mods.length > 1 && !flags.procedure && !flags.proc) {
+      console.error(`test-vba acepta como máximo 1 procedimiento directo; recibiste ${mods.length}. Ejemplo: node cli.js test-vba Canonical_RunAll --json`);
+      process.exitCode = 1;
+      return;
+    }
+    const result = await skill.testVba({
+      testsPath: flags.tests || (procedure ? null : "tests.vba.json"),
+      procedureName: procedure,
+      argsJson: flags["args-json"] !== undefined ? flags["args-json"] : flags.args_json,
+      filter: flags.filter || null,
+      accessPath,
+      json: toBoolFlag(flags.json, false),
+      compile: flags["no-compile"] ? false : true
+    });
+    if (toBoolFlag(flags.json, false)) {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      console.log(`\n${result.ok ? "✅" : "❌"} test-vba: ${result.passed}/${result.total} passed${result.skipped ? `, ${result.skipped} skipped` : ""}`);
+    }
+    if (result && result.ok === false) process.exitCode = 1;
     return;
   }
 
@@ -224,6 +315,12 @@ async function main() {
     return;
   }
 
+  if (command === "verify-code") {
+    const inSync = await skill.verifyCode({ moduleNames: mods.length > 0 ? mods : [] });
+    if (!inSync) process.exitCode = 1;
+    return;
+  }
+
   if (command === "status") {
     await skill.status();
     return;
@@ -239,13 +336,22 @@ async function main() {
   process.exitCode = 1;
 }
 
-main().catch((err) => {
-  console.error("ERROR:", err && err.message ? err.message : String(err));
-  if (err && err.stdout) {
-    console.error("\n--- stdout ---\n" + err.stdout);
-  }
-  if (err && err.stderr) {
-    console.error("\n--- stderr ---\n" + err.stderr);
-  }
-  process.exitCode = 1;
-});
+if (require.main === module) {
+  main().catch((err) => {
+    console.error("ERROR:", err && err.message ? err.message : String(err));
+    if (err && err.stdout) {
+      console.error("\n--- stdout ---\n" + err.stdout);
+    }
+    if (err && err.stderr) {
+      console.error("\n--- stderr ---\n" + err.stderr);
+    }
+    process.exitCode = 1;
+  });
+}
+
+module.exports = {
+  parseArgs,
+  _test: {
+    parseArgs,
+  },
+};

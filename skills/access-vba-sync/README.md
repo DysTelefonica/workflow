@@ -145,6 +145,114 @@ El archivo generado se nombra igual que el backend: `NombreBackend.md` dentro de
 
 ---
 
+### `compile-vba` — Compilar proyecto VBA
+
+```powershell
+node cli.js compile-vba [--access <ruta>] [--json]
+```
+
+Ejecuta el comando de Access equivalente a **Debug → Compile**. Si falla, devuelve `phase: "compile"` y, cuando VBE lo permite, `component`, `line`, `column` y `sourceLine`.
+
+---
+
+### `run-vba <Proc>` — Ejecutar función/sub pública
+
+```powershell
+node cli.js run-vba NombrePublico [--access <ruta>] [--args-json "[123,\"texto\",true,null]"] [--json]
+```
+
+Ejecuta una `Public Function` o `Public Sub` accesible vía `Access.Application.Run`. Para que una IA evalúe logs/resultados, no dependas de `Debug.Print`: devolvé un JSON string con `ok`, `value`, `logs` y/o `error`.
+
+---
+
+### `test-vba` — Runner TDD externo
+
+```powershell
+node cli.js test-vba [--access <ruta>] [--tests tests.vba.json] [--filter <texto>] [--no-compile] [--json]
+node cli.js test-vba Canonical_RunAll [--access <ruta>] [--json]
+node cli.js test-vba --procedure Canonical_RunAll [--access <ruta>] [--json]
+```
+
+Primero compila; si `phase=compile`, no ejecuta tests. Si compila, lee `tests.vba.json` y llama cada `procedure` con sus `args`. Si pasás `<Proc>` o `--procedure`, ejecuta ese procedimiento público directamente y no exige `tests.vba.json`.
+
+Ejemplo de `tests.vba.json`:
+
+```json
+{
+  "tests": [
+    {
+      "name": "calcula total básico",
+      "procedure": "Test_CalculaTotal",
+      "args": [10],
+      "expect": { "ok": true, "value": 42 },
+      "tags": ["total"]
+    }
+  ]
+}
+```
+
+Expectations soportadas: `ok`, `value`, `returnValue`, `payloadContains`, `errorContains`, `pathEquals`.
+
+#### Guía TDD para proyectos Access
+
+Estructura recomendada:
+
+```text
+src/modules/Clientes.bas
+src/modules/Test_Clientes.bas
+tests.vba.json
+```
+
+Un test debe ser una `Public Function Test_*() As String` que devuelve JSON:
+
+```vb
+Public Function Test_SumarBasico() As String
+    On Error GoTo EH
+
+    If Sumar(2, 3) = 5 Then
+        Test_SumarBasico = "{""ok"":true,""value"":5,""logs"":[""2+3 OK""]}"
+    Else
+        Test_SumarBasico = "{""ok"":false,""error"":""resultado incorrecto""}"
+    End If
+    Exit Function
+
+EH:
+    Test_SumarBasico = "{""ok"":false,""error"":""" & Replace(Err.Description, """", "'") & """}"
+End Function
+```
+
+Loop recomendado:
+
+```powershell
+node cli.js import Clientes Test_Clientes --access "MiProyecto.accdb"
+node cli.js test-vba --access "MiProyecto.accdb" --json
+```
+
+Interpretación:
+
+- `phase: "compile"` → corregí compilación; no mires assertions todavía.
+- `phase: "tests"` → corregí comportamiento usando `results[*].failures`, `run.payload` y `run.logs`.
+- No uses `Debug.Print` como contrato de logs: devolvé `logs` dentro del JSON.
+- Evitá UI/modalidad en tests (`MsgBox`, formularios abiertos, input humano).
+
+Para harness existentes, no los reescribas de entrada: si hay un `Public Sub/Function Canonical_RunAll`, ejecutá:
+
+```powershell
+node cli.js test-vba Canonical_RunAll --access "CONDOR.accdb" --password "dpddpd" --json
+```
+
+Si el harness tiene `Private` setup/runner, creá un wrapper `Public Function Test_Canonical_RunAll() As String` que llame `Canonical_Setup`, `Canonical_RunAll`, `Canonical_TearDown` y devuelva JSON.
+
+Si la apertura falla con `CRITICAL: No se pudo deshabilitar AutoExec/StartupForm`, en CI/testing controlado podés permitir startup code explícitamente:
+
+```powershell
+node cli.js test-vba Canonical_RunAll --access "CONDOR.accdb" --password "dpddpd" --allow-startup-execution --json
+```
+
+Usalo con cuidado: si AutoExec/StartupForm abre UI modal, el runner puede bloquearse.
+
+---
+
 ### `status` — Estado de la sesión
 
 ```powershell
@@ -169,7 +277,7 @@ Para el watcher si está activo, importa pendientes, realiza el export final (co
 
 | Flag | Descripción | Default |
 |---|---|---|
-| `--access <ruta>` | Ruta a la BD (.accdb/.accde/.mdb/.mde) | Autodetecta en CWD |
+| `--access <ruta>` | Ruta a la BD (.accdb/.accde/.mdb/.mde); debe estar en el directorio desde donde ejecutás el CLI | Autodetecta en CWD |
 | `--password <pwd>` | Contraseña de la BD si está protegida | — |
 | `--destination_root <dir>` | Carpeta de trabajo (export/import) | `src` |
 | `--debounce_ms <n>` | Espera en ms antes de importar en watch | `600` |
@@ -177,6 +285,13 @@ Para el watcher si está activo, importa pendientes, realiza el export final (co
 | `--backend <ruta>` | Backend para generate-erd | Autodetecta `*_Datos.accdb` |
 | `--erd_path <dir>` | Carpeta de salida para el ERD | `docs/ERD` |
 | `--auto_export_on_end false` | Desactiva export final al cerrar | `true` |
+| `--args-json <json-array>` | Argumentos simples para `run-vba` | `[]` |
+| `--tests <ruta>` | Plan de tests para `test-vba` | `tests.vba.json` |
+| `--filter <texto>` | Filtra `test-vba` por nombre/procedure/tag | — |
+| `--no-compile` | Salta compile gate en `test-vba` | `false` |
+| `--procedure <Proc>` | Ejecuta un procedimiento público directo en `test-vba` sin `tests.vba.json` | — |
+| `--allow-startup-execution` | Permite abrir aunque no pueda deshabilitar AutoExec/StartupForm | `false` |
+| `--json` | Salida machine-readable | `false` |
 
 ---
 

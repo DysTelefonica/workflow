@@ -12,7 +12,9 @@
     "start": "node cli.js start",
     "import": "node cli.js import",
     "end": "node cli.js end",
-    "status": "node cli.js status"
+    "status": "node cli.js status",
+    "test": "node --test test/unit.test.js && node --test test/fs.test.js",
+    "test:smoke": "node test/smoke.js"
   },
   "dependencies": {
     "chokidar": "^3.6.0"

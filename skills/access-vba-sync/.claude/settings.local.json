@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path \"C:\\\\Proyectos\\\\workflow\\\\skills\\\\access-vba-sync\" -Recurse)",
+      "Bash(Select-Object FullName, PSIsContainer)",
+      "Bash(ConvertTo-Json)",
+      "PowerShell(Get-ChildItem -Path \"C:\\\\Proyectos\\\\workflow\\\\skills\\\\access-vba-sync\" -Recurse -File | ForEach-Object { $_.FullName } | Sort-Object)",
+      "Bash(Remove-Item *)",
+      "Bash(node --test test/unit.test.js)",
+      "Bash(node --test test/unit.test.js test/fs.test.js)",
+      "Bash(node --test test/fs.test.js)",
+      "mcp__plugin_engram_engram__mem_context",
+      "mcp__plugin_engram_engram__mem_current_project",
+      "mcp__plugin_engram_engram__mem_search"
+    ]
+  }
+}
